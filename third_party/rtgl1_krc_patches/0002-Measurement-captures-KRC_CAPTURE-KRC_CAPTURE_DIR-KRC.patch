@@ -1,8 +1,7 @@
 From 07506ddff19110c1b5d64f89f3520538ee91e1ed Mon Sep 17 00:00:00 2001
 From: Skynizz <182822215+Skynizz@users.noreply.github.com>
 Date: Fri, 23 Oct 2026 19:05:02 +0200
-Subject: [PATCH 2/9] Captures de mesure (KRC_CAPTURE, KRC_CAPTURE_DIR,
- KRC_EXIT_AFTER)
+Subject: [PATCH 2/9] Measurement captures (KRC_CAPTURE, KRC_CAPTURE_DIR, KRC_EXIT_AFTER)
 
 ---
  CMakeLists.txt          |   2 +
@@ -58,7 +57,7 @@ index 0000000..141e352
 +namespace
 +{
 +
-+// flottant sans signe à 11 ou 10 bits (mantisse 6 ou 5 bits, exposant 5 bits)
++// unsigned 11- or 10-bit float (6- or 5-bit mantissa, 5-bit exponent)
 +float UnpackUnsignedFloat(uint32_t v, uint32_t mantissaBits)
 +{
 +    uint32_t mantissa = v & ((1u << mantissaBits) - 1);
@@ -111,7 +110,7 @@ index 0000000..141e352
 +    enabled = !frames.empty();
 +    if (enabled)
 +    {
-+        // assez grand pour du 3840×2160
++        // large enough for 3840×2160
 +        buffer.Init(allocator, (VkDeviceSize)3840 * 2160 * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
 +                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, "KRC capture");
 +#ifdef _WIN32
@@ -218,12 +217,12 @@ index 0000000..7af99bf
 @@ -0,0 +1,44 @@
 +// Copyright (c) 2026 Skynizz
 +//
-+// Outils de mesure pour la comparaison des caches de radiance (branche krc), pilotés par
-+// variables d'environnement, sans toucher au jeu :
-+//   KRC_CAPTURE=120,270,420   numéros de frame (depuis le lancement) à capturer
-+//   KRC_CAPTURE_DIR=dossier   dossier des images (défaut : krc_captures)
-+//   KRC_EXIT_AFTER=1          quitter après la dernière capture
-+// Les images sont l'image finale avant l'interface du jeu, en PPM (sRGB 8 bits).
++// Measurement tools for the radiance cache comparison (krc branch), driven by
++// environment variables, without touching the game:
++//   KRC_CAPTURE=120,270,420   frame numbers (since launch) to capture
++//   KRC_CAPTURE_DIR=folder    image folder (default: krc_captures)
++//   KRC_EXIT_AFTER=1          quit after the last capture
++// The images are the final image before the game's UI, as PPM (8-bit sRGB).
 +
 +#pragma once
 +
@@ -242,9 +241,9 @@ index 0000000..7af99bf
 +    void Init(const std::shared_ptr<MemoryAllocator> &allocator);
 +    void Destroy();
 +
-+    // copie l'image (layout GENERAL, format B10G11R11) si la frame est demandée
++    // copies the image (GENERAL layout, B10G11R11 format) if the frame is requested
 +    void Record(VkCommandBuffer cmd, VkImage image, uint32_t width, uint32_t height, uint32_t frameId);
-+    // après la soumission de la frame : attend la fin du GPU, écrit l'image
++    // after the frame is submitted: waits for the GPU, writes the image
 +    void Finish(VkDevice device, VkFence fence);
 +
 +private:
@@ -284,7 +283,7 @@ index 9e644b6..c2101c6 100644
          }
      }
  
-+    // capture de mesure : image finale, avant l'interface du jeu
++    // measurement capture: final image, before the game's UI
 +    krcCapture.Record(cmd, framebuffers->GetImage(currentResultImage, frameIndex),
 +                      renderResolution.UpscaledWidth(), renderResolution.UpscaledHeight(), frameId);
 +
@@ -316,7 +315,7 @@ index 74670be..9a81d0d 100644
  
      // incremented every frame
      uint32_t            frameId;
-+    KrcCapture          krcCapture;     // captures de mesure (KRC_CAPTURE)
++    KrcCapture          krcCapture;     // measurement captures (KRC_CAPTURE)
  
      VkFence             frameFences[MAX_FRAMES_IN_FLIGHT] = {};
      VkSemaphore         imageAvailableSemaphores[MAX_FRAMES_IN_FLIGHT] = {};

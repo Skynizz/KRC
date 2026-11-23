@@ -1,0 +1,28 @@
+From 682971aa9dc50ee564cf265cf5f8a95849d6b8a7 Mon Sep 17 00:00:00 2001
+From: Skynizz <182822215+Skynizz@users.noreply.github.com>
+Date: Fri, 23 Oct 2026 01:09:49 +0200
+Subject: [PATCH 5/6] KRC: 0.1 path/px by default (same cost as SHaRC)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ src/refresh/vkpt/shader/global_ubo.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/refresh/vkpt/shader/global_ubo.h b/src/refresh/vkpt/shader/global_ubo.h
+index 3d4923d6..f06463f1 100644
+--- a/src/refresh/vkpt/shader/global_ubo.h
++++ b/src/refresh/vkpt/shader/global_ubo.h
+@@ -43,7 +43,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
+ 	UBO_CVAR_DO(pt_sharc_downscale, 5) /* SHaRC: one updated pixel per NxN block */ \
+ 	UBO_CVAR_DO(pt_sharc_radiance_scale, 1000) /* SHaRC: quantisation of the accumulation */ \
+ 	UBO_CVAR_DO(pt_cache_bounces, 4) /* bounces of the cache update paths */ \
+-	UBO_CVAR_DO(pt_krc_ppp, 0.25) /* KRC: paths per pixel per frame (mean, Neyman allocation) */ \
++	UBO_CVAR_DO(pt_krc_ppp, 0.1) /* KRC: paths per pixel per frame (mean, Neyman allocation); 0.1: same cost as SHaRC */ \
+ 	UBO_CVAR_DO(pt_krc_cell_px, 16) /* KRC: size of a cell on screen, in pixels */ \
+ 	UBO_CVAR_DO(pt_krc_hist, 256) /* KRC: maximum history of a cell (samples) */ \
+ 	UBO_CVAR_DO(pt_krc_delta, 1) /* KRC: correlated paths (light before / after of animated lamps) */ \
+-- 
+2.55.0.windows.3
+

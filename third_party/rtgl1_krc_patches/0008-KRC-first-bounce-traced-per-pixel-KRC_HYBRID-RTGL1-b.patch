@@ -1,21 +1,19 @@
 From 48d93251a657d22221f164c92407351bd541b8d8 Mon Sep 17 00:00:00 2001
 From: Skynizz <182822215+Skynizz@users.noreply.github.com>
 Date: Sat, 24 Oct 2026 15:24:17 +0200
-Subject: [PATCH 8/9] =?UTF-8?q?KRC=20:=20premier=20rebond=20trac=C3=A9=20a?=
- =?UTF-8?q?u=20pixel=20(KRC=5FHYBRID),=20bruit=20bleu=20de=20RTGL1,=20unit?=
- =?UTF-8?q?=C3=A9=20des=20cellules=20r=C3=A9utilis=C3=A9es?=
+Subject: [PATCH 8/9] KRC: first bounce traced per pixel (KRC_HYBRID), RTGL1 blue noise, units of reused cells
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
 
-- KRC_HYBRID : 0 cellules au pixel ; 1 rebond tracé là où les cellules voisines se contredisent
-  au-delà de leur incertitude ; 2 toujours (comme SHaRC), cache de KRC lu au point touché, second
-  rebond tracé s'il n'y a pas de cellule (point hors champ).
-- Tirages du premier rebond avec le bruit bleu de RTGL1 : un hasard blanc donnait 4 fois plus de
-  bruit après le débruiteur.
-- Une cellule réutilisée en un point (rééchantillonnage des chemins, rebond tracé, reflets) donne
-  la lumière reçue par évaluation de ses harmoniques sphériques avec la normale : la valeur brute,
-  pondérée par 1/cos, valait environ le double pour une lumière uniforme.
+- KRC_HYBRID: 0 cells at the pixel; 1 bounce traced where the neighbouring cells disagree
+  beyond their uncertainty; 2 always (like SHaRC), KRC cache read at the hit point, second
+  bounce traced if there is no cell (point off screen).
+- First-bounce sampling with RTGL1's blue noise: white random numbers gave 4 times more
+  noise after the denoiser.
+- A cell reused at a point (path resampling, traced bounce, reflections) gives
+  the received light by evaluating its spherical harmonics with the normal: the raw value,
+  weighted by 1/cos, was about twice as large for a uniform light.
 
 ---
  Source/RadianceCache.cpp       |  8 +++-
@@ -36,7 +34,7 @@ index 0d00f3d..11c6841 100644
 +    traceContrast = EnvFloat("KRC_TRACE_CONTRAST", 0.3f);
 +    traceSigma = EnvFloat("KRC_TRACE_SIGMA", 1.0f);
  
-     // méthode, débogage, échelle SHaRC (50 : exemple du SDK ; voxel ≈ distance / échelle), accumulation
+     // method, debugging, SHaRC scale (50: SDK sample; voxel ≈ distance / scale), accumulation
      float p[5][4] = {
 @@ -138,8 +141,9 @@ void RadianceCache::FillUniform(ShGlobalUniform *gu, uint32_t frameIndex, uint32
      Split(curToPrevPoly[frameIndex].GetAddress(), &gu->rcAddrI[0], &gu->rcAddrI[1]);
@@ -44,8 +42,8 @@ index 0d00f3d..11c6841 100644
      Split(krcViews.GetAddress(), &gu->rcAddrJ[0], &gu->rcAddrJ[1]);
 -    gu->rcAddrJ[2] = 0;
 -    gu->rcAddrJ[3] = 0;
-+    gu->rcAddrJ[2] = hybrid;   // KRC_HYBRID : 0 jamais, 1 là où les cellules hésitent, 2 toujours
-+    // KRC_TRACE_CONTRAST en millièmes, KRC_TRACE_SIGMA en centièmes
++    gu->rcAddrJ[2] = hybrid;   // KRC_HYBRID: 0 never, 1 where the cells disagree, 2 always
++    // KRC_TRACE_CONTRAST in thousandths, KRC_TRACE_SIGMA in hundredths
 +    gu->rcAddrJ[3] = (uint32_t)(traceContrast * 1000.0f) | ((uint32_t)(traceSigma * 100.0f) << 16);
      gu->rcKrc[0] = KRC_TABLE - 1;
      gu->rcKrc[1] = KRC_CELLS;
@@ -69,17 +67,17 @@ index e41e8af..5b00255 100644
 --- a/Source/Shaders/RadianceCache.h
 +++ b/Source/Shaders/RadianceCache.h
 @@ -352,9 +352,20 @@ void krc_view_pack(KrcCell cell, uint clock, out uvec4 a, out uvec4 b, out uvec4
- // Débruiteur intégré : indirect d'un point reconstruit à partir des 4 cellules voisines dans le
- // plan de sa face (interpolation bilinéaire), pondérées par leur confiance. Déterministe : rien à
- // accumuler ni à filtrer ensuite.
-+// seuils du premier rebond tracé (passe 8) : écart des cellules à partir duquel tracer (tout tracé
-+// au double) ; nombre d'erreurs-types des cellules retirées de cet écart
+ // Built-in denoiser: indirect of a point reconstructed from the 4 neighbouring cells in the
+ // plane of its face (bilinear interpolation), weighted by their confidence. Deterministic: nothing to
+ // accumulate or filter afterwards.
++// thresholds of the traced first bounce (pass 8): cell gap from which to trace (fully traced
++// at twice that); number of standard errors of the cells removed from that gap
 +#define KRC_TRACE_CONTRAST (float(globalUniform.rcAddrJ.w & 0xffffu) * (1.0 / 1000.0))
 +#define KRC_TRACE_SIGMA    (float(globalUniform.rcAddrJ.w >> 16) * (1.0 / 100.0))
 +
-+// contrast : écart entre les cellules voisines lues ((max - min) / max des luminances), diminué de
-+// leur incertitude (3 erreurs-types) : fort seulement près d'un vrai bord, ou là où l'éclairage
-+// varie plus vite que la taille des cellules (le lissage y fuirait), pas dans le bruit des zones
++// contrast: gap between the neighbouring cells read ((max - min) / max of the luminances), minus
++// their uncertainty (3 standard errors): high only near a real edge, or where the lighting
++// varies faster than the cell size (smoothing would leak there), not in the noise of the areas
 +// sombres
  bool krc_smooth_lookup(vec3 p, vec3 n, out vec3 value, out vec4 signal, out vec3 dirR, out vec3 dirG,
 -                       out vec3 dirB, out vec3 direct)
@@ -97,7 +95,7 @@ index e41e8af..5b00255 100644
 +            const float lc = rc_lum(cv.mean);
 +            lmin = min(lmin, lc);
 +            lmax = max(lmax, lc);
-+            // erreur relative de la moyenne de la cellule, retrouvée depuis sa confiance
++            // relative error of the cell mean, recovered from its confidence
 +            rseMax = max(rseMax, RC_KRC_DN_ERR * sqrt(max(1.0 / max(cv.conf, 1e-3) - 1.0, 0.0)));
              value += w * cv.mean;
              momR += w * cv.mean.r * cv.dirR;
@@ -114,20 +112,20 @@ index e41e8af..5b00255 100644
      return sh;
  }
  
-+// Lumière reçue au point de normale n d'après une cellule, dans la grandeur de la lumière directe
-+// de RTGL1 (ce qu'un sommet multiplie par son albédo) : l'évaluation de ses harmoniques sphériques,
-+// comme pour l'affichage. La valeur brute ne convient pas : chaque échantillon y est pondéré par
-+// 1 / cos (la convention du premier rebond de RTGL1, que la reconstruction compense) ; elle vaut
-+// environ le double pour une lumière uniforme.
++// Light received at the point of normal n according to a cell, in the units of RTGL1's direct
++// light (what a vertex multiplies by its albedo): the evaluation of its spherical harmonics,
++// as for the display. The raw value does not fit: each sample in it is weighted by
++// 1 / cos (RTGL1's first-bounce convention, which the reconstruction compensates); it is worth
++// about twice as much for a uniform light.
 +vec3 krc_irradiance(vec3 mean, vec3 dirR, vec3 dirG, vec3 dirB, vec3 n)
 +{
 +    return max(mean * (0.25 + 0.5 * vec3(dot(dirR, n), dot(dirG, n), dot(dirB, n))), vec3(0));
 +}
 +
- // Une seule cellule, celle qui contient le point (pour un reflet : le lobe et le débruiteur du
--// spéculaire lissent déjà ; quatre fois moins de recherches que krc_smooth_lookup)
-+// spéculaire lissent déjà ; quatre fois moins de recherches que krc_smooth_lookup). value : la
-+// lumière reçue au point (krc_irradiance), pas la valeur brute de la cellule.
+ // A single cell, the one containing the point (for a reflection: the lobe and the specular
+-// denoiser already smooth; four times fewer lookups than krc_smooth_lookup)
++// denoiser already smooth; four times fewer lookups than krc_smooth_lookup). value: the
++// light received at the point (krc_irradiance), not the raw value of the cell.
  bool krc_point_lookup(vec3 p, vec3 n, out vec3 value, out vec4 signal, out vec3 direct, out float size)
  {
      value = vec3(0);
@@ -160,12 +158,12 @@ index 5fcd8d0..218bd0b 100644
          acc.v[b + i] = 0;
  }
  
-+// Premier rebond tracé pour un pixel (comme SHaRC) : rayon diffus tiré comme RTGL1, puis au point
-+// touché son émission, sa lumière directe et son indirect lus dans les cellules (la lumière
-+// directe calculée si le point est trop près pour la cellule). Même grandeur que la valeur des
-+// cellules.
-+// Tirages de RTGL1 (bruit bleu du pixel, mêmes sels que getDiffuseBounce et la lumière directe de
-+// son rebond) : un hasard blanc donnait 4 fois plus de bruit après le débruiteur.
++// First bounce traced for a pixel (like SHaRC): diffuse ray sampled like RTGL1, then at the hit
++// point its emission, its direct light and its indirect read from the cells (the direct
++// light computed if the point is too close for the cell). Same quantity as the value of the
++// cells.
++// RTGL1's sampling (the pixel's blue noise, same salts as getDiffuseBounce and the direct light of
++// its bounce): white random numbers gave 4 times more noise after the denoiser.
 +vec3 krc_first_bounce(RcSurface s, uint seed, out vec3 dir)
 +{
 +    float oneOverPdf;
@@ -196,7 +194,7 @@ index 5fcd8d0..218bd0b 100644
 +        }
 +        else
 +        {
-+            // pas de cellule (point hors du champ de la caméra) : le second rebond tracé, comme RTGL1
++            // no cell (point outside the camera's view): the second bounce is traced, like RTGL1
 +            float pdf2;
 +            const vec2 u2 = getRandomSample(seed, RANDOM_SALT_DIFF_BOUNCE(1)).xy;
 +            const vec3 dir2 = sampleLambertian(h.normalGeom, u2.x, u2.y, pdf2);
@@ -220,9 +218,9 @@ index 5fcd8d0..218bd0b 100644
 +    return w1 * (h.emission * h.albedo + h.albedo * light);
 +}
 +
- // Passe 8, après l'indirect de RTGL1 : l'indirect diffus du pixel lu dans les cellules voisines
- // (même grandeur que le rebond diffus de RTGL1, avec tous les rebonds, sans rayon ; direction
- // moyenne des cellules), et ce que KRC dit au débruiteur. Hors du shader des rayons indirects : la
+ // Pass 8, after RTGL1's indirect: the pixel's diffuse indirect read from the neighbouring cells
+ // (same quantity as RTGL1's diffuse bounce, with every bounce, no ray; mean direction
+ // of the cells), and what KRC tells the denoiser. Outside the indirect-ray shader: the
 @@ -1045,10 +1108,17 @@ void krc_display(ivec2 pix)
  
      vec3 value, dirR, dirG, dirB, cellDirect;
@@ -230,38 +228,38 @@ index 5fcd8d0..218bd0b 100644
 +    float contrast;
      SH sh = newSH();
 -    if (krc_smooth_lookup(s.position, s.normalGeom, value, sig, dirR, dirG, dirB, cellDirect))
-+    // part tracée : là où les cellules voisines se contredisent (bord, éclairage qui varie plus
-+    // vite que les cellules), un vrai premier rebond ; ailleurs, la valeur lisse des cellules,
-+    // sans rayon ni bruit. (La confiance des cellules ne sert pas ici : avec des chemins à queue
-+    // lourde, presque toutes passent sous le seuil et tout serait tracé.)
++    // traced share: where the neighbouring cells disagree (edge, lighting varying faster
++    // than the cells), a real first bounce; elsewhere, the smooth value of the cells,
++    // with no ray and no noise. (The cells' confidence is not used here: with heavy-tailed
++    // paths, almost all of them fall below the threshold and everything would be traced.)
 +    float traced = 1.0;
 +    if (krc_smooth_lookup(s.position, s.normalGeom, value, sig, dirR, dirG, dirB, cellDirect, contrast))
      {
          sh = krc_sh(value, dirR, dirG, dirB, s.normalGeom);
 +        traced = clamp((contrast - KRC_TRACE_CONTRAST) / KRC_TRACE_CONTRAST, 0.0, 1.0);
-         // débogage : rapports pour le débruiteur, rouge = direct > 1,05, bleu = direct < 0,95,
-         // vert = indirect hors de [0,95 ; 1,05]
+         // debugging: ratios for the denoiser, red = direct > 1.05, blue = direct < 0.95,
+         // green = indirect outside [0.95, 1.05]
          if (RC_DEBUG == 8)
 @@ -1061,6 +1131,20 @@ void krc_display(ivec2 pix)
      {
          sig = vec4(1.0, 0.0, 1.0, 1.0);
      }
 +    if (globalUniform.rcAddrJ.z == 0u)
-+        traced = 0.0;   // KRC_HYBRID=0 : jamais de rayon au pixel
++        traced = 0.0;   // KRC_HYBRID=0: never a ray at the pixel
 +    else if (globalUniform.rcAddrJ.z == 2u)
-+        traced = 1.0;   // KRC_HYBRID=2 : toujours (premier rebond tracé, comme SHaRC)
++        traced = 1.0;   // KRC_HYBRID=2: always (traced first bounce, like SHaRC)
 +    if (traced > 0.0)
 +    {
 +        vec3 d;
 +        const vec3 est = clamp(krc_first_bounce(s, getCurrentRandomSeed(pix), d), vec3(0), vec3(1e4));
 +        sh = mixSH(sh, irradianceToSH(est, d), traced);
-+        sig.y = 0.0;   // le débruiteur accumule ce pixel (une part bruitée)
++        sig.y = 0.0;   // the denoiser accumulates this pixel (a noisy share)
 +    }
-+    // débogage 9 : la part tracée (rouge)
++    // debug 9: the traced share (red)
 +    if (RC_DEBUG == 9)
 +        sh = irradianceToSH(vec3(traced * 4.0, 0.0, 0.0), s.normalGeom * (2.0 / 3.0));
-     // rapport du spéculaire : direct selon les cellules du pixel, reflet calculé au point touché ;
-     // 1 exactement quand rien ne change
+     // specular ratio: direct from the pixel's cells, reflection computed at the hit point;
+     // exactly 1 when nothing changes
      const float lumOld = spec.x / max(sig.x, 1e-3) + spec.y;
 -- 
 2.55.0.windows.3

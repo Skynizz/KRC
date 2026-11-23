@@ -1,22 +1,21 @@
 From 97afd9ad6fa49adae8ae423c3d91edd7fb620107 Mon Sep 17 00:00:00 2001
 From: Skynizz <182822215+Skynizz@users.noreply.github.com>
 Date: Thu, 22 Oct 2026 23:35:15 +0200
-Subject: [PATCH 2/6] SHaRC officiel (SDK NVIDIA v1.8.3) comme cache de
- l'indirect (pt_cache 1)
+Subject: [PATCH 2/6] Official SHaRC (NVIDIA SDK v1.8.3) as the indirect cache (pt_cache 1)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
 
-- shader/sharc/ : en-têtes GLSL du SDK, non modifiés (licence NVIDIA jointe).
-- radiance_cache.c : buffers du cache (2^22 entrées), adresses passées au UBO,
-  vidage au changement de carte ou de méthode.
-- radiance_cache.rgen : passe Update (un pixel par bloc 5×5, chemin diffus
-  depuis la surface primaire avec l'éclairage du jeu à chaque sommet) et
-  passe Resolve, entre l'éclairage direct et les rebonds.
-- indirect_lighting.rgen : au premier rebond, arrêt sur la radiance du cache
-  si le segment dépasse le voxel (règles du guide d'intégration).
-- cvars : pt_cache (0 jeu, 1 SHaRC, 2 KRC), pt_cache_debug, pt_sharc_*,
-  pt_cache_bounces ; activation de shaderInt64 et des atomiques 64 bits.
+- shader/sharc/: GLSL headers of the SDK, unmodified (NVIDIA licence included).
+- radiance_cache.c: cache buffers (2^22 entries), addresses passed to the UBO,
+  cleared on map or method change.
+- radiance_cache.rgen: Update pass (one pixel per 5×5 block, diffuse path
+  from the primary surface with the game's lighting at each vertex) and
+  Resolve pass, between direct lighting and the bounces.
+- indirect_lighting.rgen: at the first bounce, stop on the cache radiance
+  if the segment is longer than the voxel (rules of the integration guide).
+- cvars: pt_cache (0 game, 1 SHaRC, 2 KRC), pt_cache_debug, pt_sharc_*,
+  pt_cache_bounces; shaderInt64 and 64-bit atomics enabled.
 
 ---
  src/CMakeLists.txt                            |   2 +
@@ -84,7 +83,7 @@ index 8493ca61..12cfdb46 100644
  		.samplerFilterMinmax = VK_TRUE,
  		.bufferDeviceAddress = VK_TRUE,
  		.bufferDeviceAddressMultiDevice = qvk.device_count > 1 ? VK_TRUE : VK_FALSE,
-+		.shaderBufferInt64Atomics = VK_TRUE, // SHaRC : insertion des clés 64 bits
++		.shaderBufferInt64Atomics = VK_TRUE, // SHaRC: insertion of 64-bit keys
  	};
  	VkPhysicalDeviceFeatures2 device_features = {
  		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2_KHR,
@@ -93,7 +92,7 @@ index 8493ca61..12cfdb46 100644
  			.shaderCullDistance = VK_FALSE,
  			.shaderFloat64 = VK_FALSE,
 -			.shaderInt64 = VK_FALSE,
-+			.shaderInt64 = VK_TRUE, // SHaRC : clés 64 bits
++			.shaderInt64 = VK_TRUE, // SHaRC: 64-bit keys
  			.shaderInt16 = qvk.supports_fp16,
  			.shaderResourceResidency = VK_FALSE,
  			.shaderResourceMinLod = VK_FALSE,
@@ -121,8 +120,8 @@ index 5b9d3332..15c63a3f 100644
      PIPELINE_DIRECT_LIGHTING_CAUSTICS,
      PIPELINE_INDIRECT_LIGHTING_FIRST,
      PIPELINE_INDIRECT_LIGHTING_SECOND,
-+	PIPELINE_CACHE_UPDATE,      // cache de radiance : chemins de mise à jour
-+	PIPELINE_CACHE_RESOLVE,     // cache de radiance : résolution
++	PIPELINE_CACHE_UPDATE,      // radiance cache: update paths
++	PIPELINE_CACHE_RESOLVE,     // radiance cache: resolve
  
  	PIPELINE_COUNT
  } pipeline_index_t;
@@ -145,8 +144,8 @@ index 5b9d3332..15c63a3f 100644
 +		0, 1, &barrier, 0, NULL, 0, NULL);
 +}
 +
-+// Cache de radiance (pt_cache 1 : SHaRC, 2 : KRC) : mise à jour depuis la surface primaire,
-+// puis résolution, avant que les rebonds de l'indirect ne lisent le cache.
++// Radiance cache (pt_cache 1: SHaRC, 2: KRC): update from the primary surface,
++// then resolve, before the indirect bounces read the cache.
 +static void
 +trace_radiance_cache(VkCommandBuffer cmd_buf)
 +{
@@ -235,21 +234,21 @@ index 00000000..261ea46b
 +*/
 +
 +// ========================================================================== //
-+// Caches de radiance pour l'éclairage indirect, à comparer dans le jeu :
-+//   pt_cache 0 : jeu d'origine (rebonds tracés, sans cache) ;
-+//   pt_cache 1 : SHaRC, SDK officiel de NVIDIA (v1.8.3, shader/sharc/) ;
++// Radiance caches for indirect lighting, to compare in the game:
++//   pt_cache 0: original game (traced bounces, no cache);
++//   pt_cache 1: SHaRC, official NVIDIA SDK (v1.8.3, shader/sharc/);
 +//   pt_cache 2 : KRC.
-+// Ce fichier crée les buffers des caches et passe leurs adresses au UBO ;
-+// les passes (mise à jour, résolution) sont lancées par path_tracer.c.
++// This file creates the cache buffers and passes their addresses to the UBO;
++// the passes (update, resolve) are launched by path_tracer.c.
 +// ========================================================================== //
 +
 +#include "vkpt.h"
 +
 +#define SHARC_CAPACITY (1u << 22)
 +
-+static BufferResource_t buf_sharc_hash;     // clés 64 bits
-+static BufferResource_t buf_sharc_accum;    // accumulation de la frame, 16 octets
-+static BufferResource_t buf_sharc_resolved; // données résolues, 16 octets
++static BufferResource_t buf_sharc_hash;     // 64-bit keys
++static BufferResource_t buf_sharc_accum;    // accumulation of the frame, 16 bytes
++static BufferResource_t buf_sharc_resolved; // resolved data, 16 bytes
 +static bool rc_needs_clear = true;
 +static float cam_pos_prev[3];
 +static int last_cache_mode = -1;
@@ -286,7 +285,7 @@ index 00000000..261ea46b
 +	return VK_SUCCESS;
 +}
 +
-+// à appeler au changement de carte : le cache repart de zéro
++// to call on map change: the cache starts again from zero
 +void
 +vkpt_rc_reset(void)
 +{
@@ -314,7 +313,7 @@ index 00000000..261ea46b
 +	ubo->rc_cam_pos_prev[3] = 0;
 +	memcpy(cam_pos_prev, ubo->cam_pos, sizeof(cam_pos_prev));
 +
-+	// changer de méthode : on repart d'un cache vide, pour une comparaison juste
++	// switching method: start again from an empty cache, for a fair comparison
 +	int mode = (int)cvar_pt_cache->value;
 +	if (mode != last_cache_mode)
 +	{
@@ -323,7 +322,7 @@ index 00000000..261ea46b
 +	}
 +}
 +
-+// vidage des buffers (création, changement de carte ou de méthode)
++// clearing of the buffers (creation, map or method change)
 +void
 +vkpt_rc_clear_if_needed(VkCommandBuffer cmd_buf)
 +{
@@ -357,14 +356,14 @@ index 2a3a996d..6d325b34 100644
  // Variables that have "_lf", "_hf" or "_spec" suffix apply to the low-frequency, high-frequency or specular lighting channels, respectively.
  
  #define UBO_CVAR_LIST \
-+	UBO_CVAR_DO(pt_cache, 0) /* cache de radiance de l'indirect : 0 jeu d'origine, 1 SHaRC (SDK NVIDIA), 2 KRC */ \
-+	UBO_CVAR_DO(pt_cache_debug, 0) /* 1 : affiche la grille du cache (SHaRC) */ \
-+	UBO_CVAR_DO(pt_sharc_scene_scale, 50) /* SHaRC : voxel ≈ distance à la caméra / échelle, quelle que soit l'unité (50 : exemple du SDK) */ \
-+	UBO_CVAR_DO(pt_sharc_accum_frames, 20) /* SHaRC : fenêtre d'accumulation (réglage de l'exemple NVIDIA) */ \
-+	UBO_CVAR_DO(pt_sharc_stale_frames, 64) /* SHaRC : frames sans échantillon avant éviction */ \
-+	UBO_CVAR_DO(pt_sharc_downscale, 5) /* SHaRC : un pixel mis à jour par bloc NxN */ \
-+	UBO_CVAR_DO(pt_sharc_radiance_scale, 1000) /* SHaRC : quantification de l'accumulation */ \
-+	UBO_CVAR_DO(pt_cache_bounces, 4) /* rebonds des chemins de mise à jour du cache */ \
++	UBO_CVAR_DO(pt_cache, 0) /* radiance cache of the indirect: 0 original game, 1 SHaRC (NVIDIA SDK), 2 KRC */ \
++	UBO_CVAR_DO(pt_cache_debug, 0) /* 1: shows the cache grid (SHaRC) */ \
++	UBO_CVAR_DO(pt_sharc_scene_scale, 50) /* SHaRC: voxel ≈ distance to the camera / scale, whatever the unit (50: SDK sample) */ \
++	UBO_CVAR_DO(pt_sharc_accum_frames, 20) /* SHaRC: accumulation window (setting of the NVIDIA sample) */ \
++	UBO_CVAR_DO(pt_sharc_stale_frames, 64) /* SHaRC: frames without a sample before eviction */ \
++	UBO_CVAR_DO(pt_sharc_downscale, 5) /* SHaRC: one updated pixel per NxN block */ \
++	UBO_CVAR_DO(pt_sharc_radiance_scale, 1000) /* SHaRC: quantisation of the accumulation */ \
++	UBO_CVAR_DO(pt_cache_bounces, 4) /* bounces of the cache update paths */ \
  	UBO_CVAR_DO(flt_antilag_hf, 1) /* A-SVGF anti-lag filter strength, [0..inf) */ \
  	UBO_CVAR_DO(flt_antilag_lf, 0.2) \
  	UBO_CVAR_DO(flt_antilag_spec, 2) \
@@ -372,8 +371,8 @@ index 2a3a996d..6d325b34 100644
  	GLOBAL_UBO_VAR_LIST_DO(vec4,            world_size) \
  	GLOBAL_UBO_VAR_LIST_DO(vec4,            world_half_size_inv) \
  	\
-+	GLOBAL_UBO_VAR_LIST_DO(uvec4,           rc_addr_a) /* cache de radiance : SHaRC clés (xy), accumulation (zw) */ \
-+	GLOBAL_UBO_VAR_LIST_DO(uvec4,           rc_addr_b) /* SHaRC résolu (xy), capacité (z), frame (w) */ \
++	GLOBAL_UBO_VAR_LIST_DO(uvec4,           rc_addr_a) /* radiance cache: SHaRC keys (xy), accumulation (zw) */ \
++	GLOBAL_UBO_VAR_LIST_DO(uvec4,           rc_addr_b) /* SHaRC resolved (xy), capacity (z), frame (w) */ \
 +	GLOBAL_UBO_VAR_LIST_DO(vec4,            rc_cam_pos_prev) \
 +	\
  	GLOBAL_UBO_VAR_LIST_DO(DynLightData,    dyn_light_data[MAX_LIGHT_SOURCES]) \
@@ -409,10 +408,10 @@ index 917f8ca2..f5b5b857 100644
  		bounce_base_color = clamp(bounce_base_color, vec3(0), vec3(1));
  		uint bounce_cluster_idx    = triangle.cluster;
  
-+		// Cache de radiance (pt_cache 1, SHaRC) : au premier rebond, si le segment dépasse le
-+		// voxel (et, pour un reflet, si le cône du lobe le couvre), le chemin s'arrête sur la
-+		// radiance du cache, qui remplace l'éclairage du point touché et le second rebond
-+		// (règles du guide d'intégration du SDK).
++		// Radiance cache (pt_cache 1, SHaRC): at the first bounce, if the segment is longer than the
++		// voxel (and, for a reflection, if the lobe cone covers it), the path stops on the
++		// cache radiance, which replaces the lighting of the hit point and the second bounce
++		// (rules of the SDK integration guide).
 +		if (cache_mode() == CACHE_SHARC && spec_bounce_index == 0)
 +		{
 +			SharcParameters sharc_params = sharc_parameters();
@@ -453,7 +452,7 @@ index 917f8ca2..f5b5b857 100644
  	if (is_specular_ray)
  		bounce_contrib = demodulate_specular(primary_base_reflectivity, bounce_contrib);
  
-+	// pt_cache_debug 1 : vert là où le premier rebond a lu le cache, rouge sinon
++	// pt_cache_debug 1: green where the first bounce read the cache, red otherwise
 +	if (global_ubo.pt_cache_debug == 1 && spec_bounce_index == 0 && !is_specular_ray)
 +		bounce_contrib = cache_hit ? vec3(0, 2, 0) : vec3(2, 0, 0);
 +
@@ -468,23 +467,23 @@ index 00000000..8fb70219
 @@ -0,0 +1,66 @@
 +/*
 +Copyright (C) 2026, Skynizz
-+Licence GPL v2 ou ultérieure (voir license.txt).
++GPL v2 licence or later (see license.txt).
 +*/
 +
 +// ========================================================================== //
-+// Caches de radiance de l'indirect (pt_cache) : partie commune aux passes
-+// du cache (radiance_cache.rgen) et à leur lecture (indirect_lighting.rgen).
-+//   pt_cache 1 : SHaRC, SDK officiel de NVIDIA v1.8.3 (sharc/), réglages de
-+//                l'exemple du SDK ; rien n'est modifié dans le SDK.
-+// À inclure après path_tracer_rgen.h (les macros du SDK, lerp, saturate…,
-+// ne doivent pas toucher le code du jeu inclus avant).
++// Radiance caches of the indirect (pt_cache): part shared by the cache passes
++// (radiance_cache.rgen) and by their reading (indirect_lighting.rgen).
++//   pt_cache 1: SHaRC, official NVIDIA SDK v1.8.3 (sharc/), settings of
++//                the SDK sample; nothing is changed in the SDK.
++// Include after path_tracer_rgen.h (the SDK macros, lerp, saturate…,
++// must not affect the game code included before).
 +// ========================================================================== //
 +
 +#ifndef RADIANCE_CACHE_H_
 +#define RADIANCE_CACHE_H_
 +
 +#define SHARC_ENABLE_GLSL 1
-+#define SHARC_MATERIAL_DEMODULATION 1   // comme l'exemple Pathtracer du SDK
++#define SHARC_MATERIAL_DEMODULATION 1   // like the SDK Pathtracer sample
 +#ifndef SHARC_UPDATE
 +#define SHARC_UPDATE 0
 +#endif
@@ -524,8 +523,8 @@ index 00000000..8fb70219
 +	return p;
 +}
 +
-+// démodulation par l'albédo diffus (le cache stocke la lumière ÷ albédo ; la texture est
-+// remise à la lecture)
++// demodulation by the diffuse albedo (the cache stores light ÷ albedo; the texture is
++// put back when reading)
 +vec3 rc_demodulation(vec3 albedo)
 +{
 +	return max(albedo, vec3(0.05));
@@ -553,14 +552,14 @@ index 00000000..f7339164
 +*/
 +
 +// ========================================================================== //
-+// Passes des caches de radiance (pt_cache), entre l'éclairage direct et les
-+// rebonds de l'indirect :
-+//   spec_pass 0 : mise à jour. SHaRC : un pixel tiré au hasard par bloc NxN
-+//                 (pt_sharc_downscale) trace un chemin diffus depuis sa surface
-+//                 primaire et nourrit le cache à chaque sommet (SharcUpdateHit) ;
-+//   spec_pass 1 : résolution (SharcResolveEntry) sur toutes les entrées.
-+// L'éclairage de chaque sommet est celui du jeu (get_direct_illumination,
-+// get_sunlight, émission), en diffus comme les rebonds du jeu.
++// Passes of the radiance caches (pt_cache), between direct lighting and the
++// indirect bounces:
++//   spec_pass 0: update. SHaRC: one random pixel per NxN block
++//                 (pt_sharc_downscale) traces a diffuse path from its primary
++//                 surface and feeds the cache at each vertex (SharcUpdateHit);
++//   spec_pass 1: resolve (SharcResolveEntry) over every entry.
++// The lighting of each vertex is the game's (get_direct_illumination,
++// get_sunlight, emission), diffuse like the game's bounces.
 +// ========================================================================== //
 +
 +#version 460
@@ -574,7 +573,7 @@ index 00000000..f7339164
 +
 +layout(constant_id = 0) const uint spec_pass = 0;
 +
-+// ---------------------------------------------------------------- aléa
++// ---------------------------------------------------------------- random
 +uint rc_state;
 +
 +uint rc_hash(uint x)
@@ -596,12 +595,12 @@ index 00000000..f7339164
 +struct RcSurface
 +{
 +	vec3 position;
-+	vec3 normal;       // normale géométrique, tournée vers le rayon arrivant
++	vec3 normal;       // geometric normal, facing the incoming ray
 +	vec3 albedo;
 +	vec3 emissive;
 +	uint material_id;
 +	uint cluster;
-+	bool analytic_light; // lampe échantillonnée par l'éclairage direct : pas d'émission au rebond
++	bool analytic_light; // lamp sampled by direct lighting: no emission at the bounce
 +};
 +
 +int rc_shadow_mask()
@@ -624,8 +623,8 @@ index 00000000..f7339164
 +	return mask;
 +}
 +
-+// lumière diffuse sortante d'un sommet : (direct + soleil) × albédo, plus son émission
-+// (sauf lampe analytique, déjà comptée par l'éclairage direct du sommet précédent)
++// outgoing diffuse light of a vertex: (direct + sun) × albedo, plus its emission
++// (except an analytic lamp, already counted by the previous vertex's direct lighting)
 +vec3 rc_vertex_lighting(RcSurface s, vec3 view_dir, int bounce)
 +{
 +	rng_seed = rc_hash(rc_state ^ 0x9e3779b9u);
@@ -649,8 +648,8 @@ index 00000000..f7339164
 +	return clamp_output(s.albedo * (diffuse + sun_diffuse * sun_scale) + emissive);
 +}
 +
-+// surface touchée par le dernier rayon géométrique (même lecture que indirect_lighting.rgen) ;
-+// renvoie false si c'est le ciel, avec sa radiance
++// surface hit by the last geometric ray (same reading as indirect_lighting.rgen);
++// returns false for the sky, with its radiance
 +bool rc_hit_surface(vec3 dir, bool from_primary, out RcSurface s, out vec3 sky_radiance)
 +{
 +	sky_radiance = vec3(0);
@@ -690,7 +689,7 @@ index 00000000..f7339164
 +	vec3 emissive = sample_emissive_texture(triangle.material_id, minfo, tex_coord, vec2(0), vec2(0), 3);
 +	emissive *= triangle.emissive_factor;
 +	emissive += get_emissive_shell(triangle.material_id, triangle.shell) * s.albedo;
-+	emissive *= sqrt(max(0, -dot(dir, s.normal))); // même profil que l'échantillonnage des lampes
++	emissive *= sqrt(max(0, -dot(dir, s.normal))); // same profile as lamp sampling
 +	s.emissive = emissive;
 +
 +	s.material_id = triangle.material_id;
@@ -699,7 +698,7 @@ index 00000000..f7339164
 +	return true;
 +}
 +
-+// surface primaire du pixel (G-buffer) ; false si pas de surface éclairable
++// primary surface of the pixel (G-buffer); false if there is no lit surface
 +bool rc_primary_surface(ivec2 ipos, out RcSurface s, out vec3 view_dir)
 +{
 +	vec4 position_material = texelFetch(TEX_PT_SHADING_POSITION, ipos, 0);
@@ -717,13 +716,13 @@ index 00000000..f7339164
 +	vec3 base_reflectivity;
 +	get_reflectivity(base_color.rgb, metallic, s.albedo, base_reflectivity);
 +	s.cluster = texelFetch(TEX_PT_CLUSTER_A, ipos, 0).x;
-+	if (s.cluster == 0xffff) s.cluster = ~0u; // l'image est en uint16
-+	s.emissive = vec3(0); // l'émission vue par la caméra est déjà dans l'image
++	if (s.cluster == 0xffff) s.cluster = ~0u; // the image is uint16
++	s.emissive = vec3(0); // the emission seen by the camera is already in the image
 +	s.analytic_light = true;
 +	return true;
 +}
 +
-+// rebond diffus depuis s : direction tirée selon le cosinus, rayon géométrique
++// diffuse bounce from s: cosine-sampled direction, geometric ray
 +bool rc_bounce(RcSurface s, vec3 view_dir, out vec3 dir)
 +{
 +	vec2 u = vec2(rc_rand(), rc_rand());
@@ -771,7 +770,7 @@ index 00000000..f7339164
 +
 +		vec3 dir;
 +		bool found = rc_bounce(s, view_dir, dir);
-+		// rebond lambertien tiré selon le cosinus : poids = albédo
++		// Lambertian bounce sampled by cosine: weight = albedo
 +		SharcSetThroughput(state, s.albedo);
 +		if (!found)
 +		{
@@ -819,11 +818,11 @@ index 00000000..cfbddf0b
 @@ -0,0 +1,15 @@
 +/*
 +Copyright (C) 2026, Skynizz
-+Licence GPL v2 ou ultérieure (voir license.txt).
++GPL v2 licence or later (see license.txt).
 +*/
 +
-+// Extensions requises par le SDK SHaRC (sharc/SharcGlslHelpers.h). À inclure juste après
-+// #version, avant tout code.
++// Extensions required by the SHaRC SDK (sharc/SharcGlslHelpers.h). Include right after
++// #version, before any code.
 +
 +#extension GL_EXT_buffer_reference : require
 +#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
@@ -2736,7 +2735,7 @@ index f43508c8..8f0886a3 100644
  
  VkResult vkpt_pt_init(void);
 +
-+// caches de radiance (radiance_cache.c)
++// radiance caches (radiance_cache.c)
 +VkResult vkpt_rc_init(void);
 +VkResult vkpt_rc_destroy(void);
 +void vkpt_rc_reset(void);

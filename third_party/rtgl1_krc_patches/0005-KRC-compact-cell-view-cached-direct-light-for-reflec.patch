@@ -1,19 +1,17 @@
 From dd83ab10f38f97d1279118eae233c5ccd1fde516 Mon Sep 17 00:00:00 2001
 From: Skynizz <182822215+Skynizz@users.noreply.github.com>
 Date: Sat, 24 Oct 2026 03:22:03 +0200
-Subject: [PATCH 5/9] =?UTF-8?q?KRC=20:=20vue=20compacte=20des=20cellules,?=
- =?UTF-8?q?=20lumi=C3=A8re=20directe=20en=20cache=20aux=20reflets,=20lectu?=
- =?UTF-8?q?re=20au=20pixel=20en=20passe=208?=
+Subject: [PATCH 5/9] KRC: compact cell view, cached direct light for reflections, per-pixel read in pass 8
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
 
-- Vue de 32 octets par cellule, écrite à la résolution ; ses rapports ne valent que dans la frame
-  de leur résolution (une cellule non résolue ne rééclaire plus deux fois).
-- Les cellules gardent la lumière directe moyenne (rééclairée) : au point touché par un reflet,
-  règle du cône de SHaRC, plus de rayons d'ombre.
-- Lecture de l'indirect au pixel sortie du shader des rayons indirects (passe 8) : -0,3 ms.
-- Passe des pixels sur un pixel par bloc 2x2 (position tournante), chemins x4.
+- 32-byte view per cell, written at resolve time; its ratios are only valid in the frame
+  of their resolve (an unresolved cell no longer relights twice).
+- The cells keep the mean (relit) direct light: at the point hit by a reflection,
+  SHaRC's cone rule, no more shadow rays.
+- Per-pixel indirect read moved out of the indirect-ray shader (pass 8): -0.3 ms.
+- Pixel pass on one pixel per 2x2 block (rotating position), paths x4.
 
 ---
  Source/Generated/GenerateShaderCommon.py |   7 +-
@@ -37,7 +35,7 @@ index 498e490..64fe641 100644
 +++ b/Source/Generated/GenerateShaderCommon.py
 @@ -280,7 +280,7 @@ CONST = {
      "SBT_INDEX_RAYGEN_INDIRECT"             : 3,
-     # caches de radiance (branche krc) : une passe par raygen, RtCache0..7.rgen
+     # radiance caches (krc branch): one pass per raygen, RtCache0..7.rgen
      "SBT_INDEX_RAYGEN_CACHE_0"              : 4,
 -    "SBT_INDEX_RAYGEN_CACHE_COUNT"          : 8,
 +    "SBT_INDEX_RAYGEN_CACHE_COUNT"          : 9,
@@ -45,20 +43,20 @@ index 498e490..64fe641 100644
      "SBT_INDEX_MISS_SHADOW"                 : 1,
      "SBT_INDEX_HITGROUP_FULLY_OPAQUE"       : 0,
 @@ -581,14 +581,15 @@ GLOBAL_UNIFORM_STRUCT = [
-     (TYPE_UINT32,       4,      "rcAddrF",                          1),  # KRC : liste libre, cellules des pixels
-     (TYPE_UINT32,       4,      "rcAddrG",                          1),  # KRC : tâches, signaux du débruiteur
-     (TYPE_UINT32,       4,      "rcAddrH",                          1),  # référence ; lampes actuel -> précédent (sphères, polygones)
--    (TYPE_UINT32,       4,      "rcAddrI",                          1),  # lampes : actuel -> précédent (polygones)
-+    (TYPE_UINT32,       4,      "rcAddrI",                          1),  # lampes : actuel -> précédent (polygones) ; rapports des groupes
-+    (TYPE_UINT32,       4,      "rcAddrJ",                          1),  # KRC : vue compacte des cellules ; -
-     (TYPE_UINT32,       4,      "rcKrc",                            1),  # masque de la table, capacité, pixels max, -
+     (TYPE_UINT32,       4,      "rcAddrF",                          1),  # KRC: free list, pixel cells
+     (TYPE_UINT32,       4,      "rcAddrG",                          1),  # KRC: tasks, denoiser signals
+     (TYPE_UINT32,       4,      "rcAddrH",                          1),  # reference; lamps current -> previous (spheres, polygons)
+-    (TYPE_UINT32,       4,      "rcAddrI",                          1),  # lamps: current -> previous (polygons)
++    (TYPE_UINT32,       4,      "rcAddrI",                          1),  # lamps: current -> previous (polygons); group ratios
++    (TYPE_UINT32,       4,      "rcAddrJ",                          1),  # KRC: compact view of the cells; -
+     (TYPE_UINT32,       4,      "rcKrc",                            1),  # table mask, capacity, max pixels, -
      (TYPE_FLOAT32,      4,      "rcCamPosPrev",                     1),
-     (TYPE_FLOAT32,      4,      "rcParams0",                        1),  # méthode, débogage, échelle SHaRC, accumulation SHaRC
-     (TYPE_FLOAT32,      4,      "rcParams1",                        1),  # frames périmées SHaRC, 1 pixel sur NxN, échelle radiance, rebonds
-     (TYPE_FLOAT32,      4,      "rcParams2",                        1),  # KRC : chemins/px, taille cellule (px), historique, chemins corrélés
-     (TYPE_FLOAT32,      4,      "rcParams3",                        1),  # KRC : détection, débruiteur intégré, dialogue, erreur admise
--    (TYPE_FLOAT32,      4,      "rcParams4",                        1),  # référence : rebonds ; rééclairage par lampe ; -, -
-+    (TYPE_FLOAT32,      4,      "rcParams4",                        1),  # référence : rebonds ; rééclairage par groupe ; correctif du gradient ; rééchantillonnage
+     (TYPE_FLOAT32,      4,      "rcParams0",                        1),  # method, debugging, SHaRC scale, SHaRC accumulation
+     (TYPE_FLOAT32,      4,      "rcParams1",                        1),  # SHaRC stale frames, 1 pixel per NxN, radiance scale, bounces
+     (TYPE_FLOAT32,      4,      "rcParams2",                        1),  # KRC: paths/px, cell size (px), history, correlated paths
+     (TYPE_FLOAT32,      4,      "rcParams3",                        1),  # KRC: detection, built-in denoiser, dialogue, accepted error
+-    (TYPE_FLOAT32,      4,      "rcParams4",                        1),  # reference: bounces; per-lamp relighting; -, -
++    (TYPE_FLOAT32,      4,      "rcParams4",                        1),  # reference: bounces; per-group relighting; gradient fix; resampling
  
      #(TYPE_FLOAT32,      1,      "_pad0",                            1),
      #(TYPE_FLOAT32,      1,      "_pad1",                            1),
@@ -112,10 +110,10 @@ index da5df03..91634e3 100644
  constexpr uint32_t SHARC_CAPACITY = 1u << 22;
  constexpr uint32_t KRC_TABLE = 1u << 22;
  constexpr uint32_t KRC_CELLS = 1u << 20;
--constexpr uint32_t KRC_CELL_SIZE = 112;  // octets, struct KrcCell (Shaders/RadianceCache.h)
--constexpr uint32_t KRC_ACC = 24;         // accumulateurs 64 bits par cellule
-+constexpr uint32_t KRC_CELL_SIZE = 128;  // octets, struct KrcCell (Shaders/RadianceCache.h)
-+constexpr uint32_t KRC_ACC = 27;         // accumulateurs 64 bits par cellule
+-constexpr uint32_t KRC_CELL_SIZE = 112;  // bytes, struct KrcCell (Shaders/RadianceCache.h)
+-constexpr uint32_t KRC_ACC = 24;         // 64-bit accumulators per cell
++constexpr uint32_t KRC_CELL_SIZE = 128;  // bytes, struct KrcCell (Shaders/RadianceCache.h)
++constexpr uint32_t KRC_ACC = 27;         // 64-bit accumulators per cell
  constexpr uint32_t KRC_CTR = 64;
  constexpr uint32_t KRC_K = 4;
  constexpr uint32_t KRC_MAX_PIXELS = 2560u * 1600u;
@@ -172,10 +170,10 @@ index da5df03..91634e3 100644
  void RadianceCache::Trace(VkCommandBuffer cmd, uint32_t frameIndex, const std::shared_ptr<RayTracingPipeline> &rtPipeline,
 @@ -236,7 +240,7 @@ void RadianceCache::Trace(VkCommandBuffer cmd, uint32_t frameIndex, const std::s
      {
-         // KRC : compteurs, cellules des pixels (Neyman), chemins (tâches), liste libre, éviction, résolution
+         // KRC: counters, pixel cells (Neyman), paths (tasks), free list, eviction, resolve
          Dispatch(cmd, rtPipeline, 2, 1, 1);
 -        Dispatch(cmd, rtPipeline, 3, width, height);
-+        Dispatch(cmd, rtPipeline, 3, (width + 1) / 2, (height + 1) / 2);   // un pixel par bloc 2×2
++        Dispatch(cmd, rtPipeline, 3, (width + 1) / 2, (height + 1) / 2);   // one pixel per 2×2 block
          timer.Write(cmd, frameIndex, KrcGpuTimer::CACHE_PIXEL);
          Dispatch(cmd, rtPipeline, 7, width, height);
          timer.Write(cmd, frameIndex, KrcGpuTimer::CACHE_TRACE);
@@ -202,7 +200,7 @@ index 144d46c..7427d1d 100644
      void FillUniform(ShGlobalUniform *gu, uint32_t frameIndex, uint32_t frameId, const LightManager &lights);
      void Trace(VkCommandBuffer cmd, uint32_t frameIndex, const std::shared_ptr<RayTracingPipeline> &rtPipeline,
                 uint32_t width, uint32_t height, KrcGpuTimer &timer);
-+    // après l'indirect de RTGL1 : KRC écrit l'indirect diffus des pixels (passe 8)
++    // after RTGL1's indirect: KRC writes the diffuse indirect of the pixels (pass 8)
 +    void AfterIndirect(VkCommandBuffer cmd, const std::shared_ptr<RayTracingPipeline> &rtPipeline, uint32_t width,
 +                       uint32_t height);
      void Reset() { needsClear = true; }
@@ -255,9 +253,9 @@ index 0f40c3f..cdabf5c 100644
 +++ b/Source/Shaders/RadianceCache.h
 @@ -131,6 +131,8 @@ struct KrcCell
      float pad;
-     vec3 excess;      // énergie écrêtée des lucioles, rendue peu à peu à la moyenne
+     vec3 excess;      // energy clamped from fireflies, given back gradually to the mean
      float pad2;
-+    vec3 direct;      // lumière directe moyenne au point (sans l'albédo), rééclairée comme le reste
++    vec3 direct;      // mean direct light at the point (without albedo), relit like the rest
 +    float pad3;
  };
  layout(buffer_reference, std430, buffer_reference_align = 16) buffer KrcCells { KrcCell c[]; };
@@ -265,17 +263,17 @@ index 0f40c3f..cdabf5c 100644
 @@ -139,7 +141,7 @@ layout(buffer_reference, std430, buffer_reference_align = 16) buffer KrcCells {
  #define KRC_TOMB     0xffffffffu
  #define KRC_FX       65536.0
- // accumulateurs par cellule (64 bits, virgule fixe KRC_FX)
+ // accumulators per cell (64 bits, KRC_FX fixed point)
 -#define KRC_ACC      24
 +#define KRC_ACC      27
- #define KRC_A_FOOT   0   // la cellule est lue dans la frame
- #define KRC_A_FN     1   // échantillons de la frame
+ #define KRC_A_FOOT   0   // the cell is read in the frame
+ #define KRC_A_FN     1   // samples of the frame
  #define KRC_A_SUM    2   // 2..4 : somme rgb
 @@ -153,6 +155,7 @@ layout(buffer_reference, std430, buffer_reference_align = 16) buffer KrcCells {
- #define KRC_A_LIND   17  // 17..18 : part de l'indirect due à ces lampes (luminance)
- #define KRC_A_LDIR   19  // 19..20 : part de la lumière directe au départ due à ces lampes
- #define KRC_A_EXC    21  // 21..23 : énergie écrêtée dans la frame (rgb)
-+#define KRC_A_D0RGB  24  // 24..26 : lumière directe au point de départ (rgb)
+ #define KRC_A_LIND   17  // 17..18: share of the indirect due to these lamps (luminance)
+ #define KRC_A_LDIR   19  // 19..20: share of the direct light at the start due to these lamps
+ #define KRC_A_EXC    21  // 21..23: energy clamped in the frame (rgb)
++#define KRC_A_D0RGB  24  // 24..26: direct light at the start point (rgb)
  // compteurs (64 bits)
  #define KRC_C_CELLS     0
  #define KRC_C_NVIS      1
@@ -283,11 +281,11 @@ index 0f40c3f..cdabf5c 100644
      return KRC_NONE;
  }
  
-+// Vue compacte d'une cellule (32 octets), écrite à sa résolution, seule lue par l'affichage :
-+//  a : moyenne r g ; moyenne b, poids (n / 16 plafonné à 1, 0 : inutilisable) ; rapports direct,
++// Compact view of a cell (32 bytes), written at its resolve, the only thing the display reads:
++//  a: mean r g; mean b, weight (n / 16 capped at 1, 0: unusable); direct ratios,
 +//      indirect ; confiance
-+//  b : lumière directe r g ; b ; direction moyenne (snorm 8 bits) ; frame de la résolution
-+// Les rapports ne valent que dans la frame de leur résolution (sinon 1 : rien à rééclairer).
++//  b: direct light r g; b; mean direction (8-bit snorm); frame of the resolve
++// The ratios are only valid in the frame of their resolve (otherwise 1: nothing to relight).
 +layout(buffer_reference, std430, buffer_reference_align = 16) buffer KrcViews { uvec4 v[]; };
 +KrcViews krc_views() { return KrcViews(rc_address(globalUniform.rcAddrJ.xy)); }
 +
@@ -327,9 +325,9 @@ index 0f40c3f..cdabf5c 100644
 +    b = uvec4(packHalf2x16(d.xy), packHalf2x16(vec2(d.z, 0.0)), packSnorm4x8(vec4(clamp(cell.dir, -1.0, 1.0), 0.0)), clock);
 +}
 +
- // Débruiteur intégré : indirect d'un point reconstruit à partir des 4 cellules voisines dans le
- // plan de sa face (interpolation bilinéaire), pondérées par leur confiance. Déterministe : rien à
- // accumuler ni à filtrer ensuite.
+ // Built-in denoiser: indirect of a point reconstructed from the 4 neighbouring cells in the
+ // plane of its face (bilinear interpolation), weighted by their confidence. Deterministic: nothing to
+ // accumulate or filter afterwards.
 -bool krc_smooth_indirect(vec3 p, vec3 n, out vec3 value, out vec4 signal, out vec3 dir)
 +bool krc_smooth_lookup(vec3 p, vec3 n, out vec3 value, out vec4 signal, out vec3 dir, out vec3 direct)
  {
@@ -387,8 +385,8 @@ index 0f40c3f..cdabf5c 100644
      return true;
  }
  
-+// Une seule cellule, celle qui contient le point (pour un reflet : le lobe et le débruiteur du
-+// spéculaire lissent déjà ; quatre fois moins de recherches que krc_smooth_lookup)
++// A single cell, the one containing the point (for a reflection: the lobe and the specular
++// denoiser already smooth; four times fewer lookups than krc_smooth_lookup)
 +bool krc_point_lookup(vec3 p, vec3 n, out vec3 value, out vec4 signal, out vec3 direct, out float size)
 +{
 +    value = vec3(0);
@@ -427,17 +425,17 @@ index 66326ae..4d92e33 100644
 +            cell.direct = vec3(0);
 +            cell.pad3 = 0.0;
              krc_cells().c[c] = cell;
-+            krc_views().v[2u * c] = uvec4(0);   // poids nul : pas encore affichable
++            krc_views().v[2u * c] = uvec4(0);   // zero weight: not displayable yet
              atomicExchange(vals.v[h], c + 1u);
              return c;
          }
 @@ -632,20 +635,20 @@ void krc_prep()
  
- // passe 3 : la cellule du pixel (créée si besoin), puis ses tâches : en moyenne
- // KRC_PPP × sigma / sigma moyen chemins (allocation de Neyman)
+ // pass 3: the pixel's cell (created if needed), then its tasks: on average
+ // KRC_PPP × sigma / mean sigma paths (Neyman allocation)
 -void krc_pixel(ivec2 pix)
-+// Un pixel sur quatre (un par bloc 2×2, la position tourne à chaque frame) : une cellule couvre
-+// environ 16×16 pixels, elle est vue chaque frame ; ces pixels portent quatre fois plus de chemins.
++// One pixel out of four (one per 2×2 block, the position rotates every frame): a cell covers
++// about 16×16 pixels, it is seen every frame; these pixels carry four times as many paths.
 +void krc_pixel(ivec2 block)
  {
 +    const uint rot = RC_FRAME & 3u;
@@ -466,9 +464,9 @@ index 66326ae..4d92e33 100644
          return;
      const uint fa = c * KRC_ACC + KRC_A_FOOT;
 @@ -674,8 +676,8 @@ void krc_pixel(ivec2 pix)
-     // allocation défensive : 30 % uniforme, 70 % selon Neyman. Selon Neyman seul, une cellule
-     // dont les chemins n'ont pas encore trouvé de source rare (sigma presque nul) n'en reçoit
-     // presque plus et reste trop sombre : l'allocation dépend de sa propre estimation (biais)
+     // defensive allocation: 30 % uniform, 70 % by Neyman. With Neyman alone, a cell
+     // whose paths have not yet found a rare source (sigma almost zero) gets almost
+     // none any more and stays too dark: the allocation depends on its own estimate (bias)
 -    const float p = RC_KRC_PPP * (sigmaMean > 0 ? 0.3 + 0.7 * sigma / sigmaMean : 1.0);
 -    const uint paths = uint(floor(min(p, 4.0) + rc_rand()));
 +    const float p = 4.0 * RC_KRC_PPP * (sigmaMean > 0 ? 0.3 + 0.7 * sigma / sigmaMean : 1.0);
@@ -487,14 +485,14 @@ index 66326ae..4d92e33 100644
      }
      krc_add_light(b, pathLight, pathLightLum, (d0Light == pathLight) ? d0Lum : 0.0);
 @@ -942,6 +947,9 @@ void krc_resolve(uint id)
-         // (même échantillon et même ombre avant et après : vaut 1 exactement si rien ne change)
+         // (same sample and same shadow before and after: exactly 1 if nothing changes)
          const float measured = (d0o > 1e-5) ? clamp(d0n / d0o, 0.0, 50.0) : 1.0;
          cell.relight = RC_KRC_RELIGHT ? relightD0 + (1.0 - coveredD0) * (measured - 1.0) : measured;
-+        // lumière directe moyenne : l'ancienne rééclairée, puis la moyenne glissante
++        // mean direct light: the old one relit, then the running mean
 +        const vec3 fdirect = vec3(krc_load(b + KRC_A_D0RGB), krc_load(b + KRC_A_D0RGB + 1u), krc_load(b + KRC_A_D0RGB + 2u)) / fn;
 +        cell.direct = (cell.n > fn) ? mix(cell.direct * cell.relight, fdirect, a) : fdirect;
  
-         // parts des lampes suivies (moyenne glissante des fractions mesurées dans la frame)
+         // shares of the tracked lamps (running mean of the fractions measured in the frame)
          if (RC_KRC_RELIGHT)
 @@ -983,16 +991,63 @@ void krc_resolve(uint id)
      {
@@ -515,10 +513,10 @@ index 66326ae..4d92e33 100644
          acc.v[b + i] = 0;
  }
  
-+// Passe 8, après l'indirect de RTGL1 : l'indirect diffus du pixel lu dans les cellules voisines
-+// (même grandeur que le rebond diffus de RTGL1, avec tous les rebonds, sans rayon ; direction
-+// moyenne des cellules), et ce que KRC dit au débruiteur. Hors du shader des rayons indirects : la
-+// lecture y prenait des registres et ralentissait tous ses rayons.
++// Pass 8, after RTGL1's indirect: the pixel's diffuse indirect read from the neighbouring cells
++// (same quantity as RTGL1's diffuse bounce, with every bounce, no ray; mean direction
++// of the cells), and what KRC tells the denoiser. Outside the indirect-ray shader: the
++// lookup there took registers and slowed down all its rays.
 +void krc_display(ivec2 pix)
 +{
 +    if (pix.x >= int(RC_WIDTH) || pix.y >= int(RC_HEIGHT) || !rc_fits())
@@ -528,7 +526,7 @@ index 66326ae..4d92e33 100644
 +    if (!rc_primary_surface(pix, s, toViewer))
 +        return;
 +    const uint i = rc_pixel_index(pix);
-+    // luminances du spéculaire écrites par l'indirect : direct, reflet avec l'éclairage d'avant, total
++    // specular luminances written by the indirect: direct, reflection with the previous lighting, total
 +    const vec4 spec = krc_signal().v[i];
 +
 +    vec3 value, dir;
@@ -537,8 +535,8 @@ index 66326ae..4d92e33 100644
 +    if (krc_smooth_indirect(s.position, s.normalGeom, value, sig, dir))
 +    {
 +        sh = irradianceToSH(value, (length(dir) > 0.05) ? dir : s.normalGeom * (2.0 / 3.0));
-+        // débogage : rapports pour le débruiteur, rouge = direct > 1,05, bleu = direct < 0,95,
-+        // vert = indirect hors de [0,95 ; 1,05]
++        // debugging: ratios for the denoiser, red = direct > 1.05, blue = direct < 0.95,
++        // green = indirect outside [0.95, 1.05]
 +        if (RC_DEBUG == 8)
 +        {
 +            sh = irradianceToSH(vec3(sig.x > 1.05 ? 100.0 : 0.0, abs(sig.z - 1.0) > 0.05 ? 100.0 : 0.0,
@@ -549,15 +547,15 @@ index 66326ae..4d92e33 100644
 +    {
 +        sig = vec4(1.0, 0.0, 1.0, 1.0);
 +    }
-+    // rapport du spéculaire : direct selon les cellules du pixel, reflet calculé au point touché ;
-+    // 1 exactement quand rien ne change
++    // specular ratio: direct from the pixel's cells, reflection computed at the hit point;
++    // exactly 1 when nothing changes
 +    const float lumOld = spec.x / max(sig.x, 1e-3) + spec.y;
 +    sig.w = (lumOld > 1e-6) ? clamp(spec.z / lumOld, 0.0, 50.0) : sig.x;
 +    krc_signal().v[i] = sig;
 +    imageStoreUnfilteredIndirectSH(pix, sh);
 +}
 +
- // ---------------------------------------------------------------- référence (mode 3)
+ // ---------------------------------------------------------------- reference (mode 3)
  void ref_pixel(ivec2 pix)
  {
 @@ -1043,5 +1098,8 @@ void main()
@@ -576,7 +574,7 @@ index 0000000..f6d6dbb
 +++ b/Source/Shaders/RtCache8.rgen
 @@ -0,0 +1,7 @@
 +// Copyright (c) 2026 Skynizz
-+// Passe 8 des caches de radiance (voir RtCache.inl).
++// Pass 8 of the radiance caches (see RtCache.inl).
 +
 +#version 460
 +#include "RadianceCacheExt.h"
@@ -590,10 +588,10 @@ index d9759a8..af03932 100644
              }
          }
  
-+        // KRC : les cellules au point touché. Si le segment dépasse la cellule (et, pour un reflet,
-+        // si le cône du lobe la couvre : la règle de SHaRC), la lumière directe vient aussi des
-+        // cellules, sans rayon d'ombre ; sinon elle est calculée au point, le second rebond vient
-+        // des cellules
++        // KRC: the cells at the hit point. If the segment is longer than the cell (and, for a reflection,
++        // if the lobe cone covers it: SHaRC's rule), the direct light also comes from the
++        // cells, with no shadow ray; otherwise it is computed at the point, the second bounce comes
++        // from the cells
 +        bool krcHit = false;
 +        vec3 krcValue, krcDirect;
 +        vec4 krcSignal;
@@ -628,9 +626,9 @@ index d9759a8..af03932 100644
          vec3 diffuse, specular;
          processDirectIllumination(
 @@ -193,19 +227,14 @@ vec3 processBounce(
-         // KRC : au point touché, le second rebond est lu dans les cellules (tous les rebonds, sans
-         // rayon) ; pour le débruiteur, le même reflet avec l'éclairage d'avant (l'émission ne
-         // change pas, la lumière des lampes suit les rapports des cellules)
+         // KRC: at the hit point, the second bounce is read from the cells (every bounce, no
+         // ray); for the denoiser, the same reflection with the previous lighting (emission does not
+         // change, the lamps' light follows the cells' ratios)
 -        if (cache_mode() == CACHE_KRC && rc_fits())
 +        if (krcHit)
          {
@@ -656,9 +654,9 @@ index d9759a8..af03932 100644
  {
      rcSpecularBounce = false;
  
--    // KRC : indirect lu dans les cellules voisines (même grandeur que le rebond diffus de RTGL1,
--    // avec tous les rebonds), sans rayon ; direction moyenne mesurée par les cellules. Tant que
--    // les cellules n'ont pas d'échantillon, RTGL1 trace son rebond comme avant.
+-    // KRC: indirect read from the neighbouring cells (same quantity as RTGL1's diffuse bounce,
+-    // with every bounce), no ray; mean direction measured by the cells. As long as
+-    // the cells have no sample, RTGL1 traces its bounce as before.
 -    if (cache_mode() == CACHE_KRC && rc_fits())
 -    {
 -        vec3 cellValue, cellDir;
@@ -666,15 +664,15 @@ index d9759a8..af03932 100644
 -        if (krc_smooth_indirect(surfPosition, surfNormalGeom, cellValue, cellSignal, cellDir))
 -        {
 -            krc_signal().v[rc_pixel_index(ivec2(gl_LaunchIDEXT.xy))] = cellSignal;
--            // débogage : rouge = NaN ou infini, vert = luminance > 1, bleu = luminance > 10
+-            // debugging: red = NaN or infinite, green = luminance > 1, blue = luminance > 10
 -            if (RC_DEBUG == 7)
 -            {
 -                const float l = rc_lum(cellValue);
 -                const bool bad = any(isnan(cellValue)) || any(isinf(cellValue));
 -                return irradianceToSH(vec3(bad ? 100.0 : 0.0, (!bad && l > 1.0) ? 100.0 : 0.0, (!bad && l > 10.0) ? 100.0 : 0.0), surfNormalGeom * (2.0 / 3.0));
 -            }
--            // débogage : rapports pour le débruiteur, rouge = direct > 1,05, bleu = direct < 0,95,
--            // vert = indirect hors de [0,95 ; 1,05]
+-            // debugging: ratios for the denoiser, red = direct > 1.05, blue = direct < 0.95,
+-            // green = indirect outside [0.95, 1.05]
 -            if (RC_DEBUG == 8)
 -            {
 -                return irradianceToSH(vec3(cellSignal.x > 1.05 ? 100.0 : 0.0, abs(cellSignal.z - 1.0) > 0.05 ? 100.0 : 0.0, cellSignal.x < 0.95 ? 100.0 : 0.0), surfNormalGeom * (2.0 / 3.0));
@@ -683,9 +681,9 @@ index d9759a8..af03932 100644
 -        }
 -        krc_signal().v[rc_pixel_index(ivec2(gl_LaunchIDEXT.xy))] = vec4(1.0, 0.0, 1.0, 0.0);
 -    }
-+    // KRC : l'indirect diffus du pixel est lu dans les cellules par la passe 8 (RtCache.inl),
-+    // après ce shader : cette fonction n'est pas appelée dans ce mode
-     // référence : le chemin complet du pixel (à accumuler)
++    // KRC: the pixel's diffuse indirect is read from the cells by pass 8 (RtCache.inl),
++    // after this shader: this function is not called in that mode
+     // reference: the pixel's full path (to be accumulated)
      if (cache_mode() == CACHE_REF && rc_fits())
      {
 @@ -321,7 +325,8 @@ void processIndirectIllumination(
@@ -693,7 +691,7 @@ index d9759a8..af03932 100644
      rcSpecOldTotal = vec3(0);
  
 -    if (surfRoughness <= FAKE_ROUGH_SPECULAR_THRESHOLD + FAKE_ROUGH_SPECULAR_LENGTH)
-+    // mesure du coût (débogage 21) : sans reflet tracé
++    // cost measurement (debug 21): no traced reflection
 +    if (surfRoughness <= FAKE_ROUGH_SPECULAR_THRESHOLD + FAKE_ROUGH_SPECULAR_LENGTH && RC_DEBUG != 21)
      {
          const vec3 directSpecular = texelFetchUnfilteredSpecular(pix);
@@ -704,8 +702,8 @@ index d9759a8..af03932 100644
  
 +    if (cache_mode() == CACHE_KRC && rc_fits())
 +    {
-+        // KRC : l'indirect diffus vient de la passe 8 ; pour elle, les luminances du spéculaire
-+        // (direct, reflet avec l'éclairage d'avant, total), dont elle tire le rapport du spéculaire
++        // KRC: the diffuse indirect comes from pass 8; for it, the specular luminances
++        // (direct, reflection with the previous lighting, total), from which it derives the specular ratio
 +        krc_signal().v[rc_pixel_index(pix)] =
 +            vec4(getLuminance(rcSpecDirect), getLuminance(rcSpecOldTotal), getLuminance(rcSpecNew), 0.0);
 +    }
@@ -718,8 +716,8 @@ index d9759a8..af03932 100644
          imageStoreUnfilteredIndirectSH(pix, bounceSH);
      }
 -
--    // KRC : rapport du spéculaire pour le débruiteur (direct : rapport de la cellule du pixel ;
--    // reflet : calculé au point touché) ; 1 exactement quand rien ne change
+-    // KRC: specular ratio for the denoiser (direct: ratio of the pixel's cell;
+-    // reflection: computed at the hit point); exactly 1 when nothing changes
 -    if (cache_mode() == CACHE_KRC && rc_fits())
 -    {
 -        const uint i = rc_pixel_index(pix);

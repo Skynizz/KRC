@@ -1,23 +1,21 @@
 From 5a5388d7d840712c0b428e1b8fcae39d443bf0ae Mon Sep 17 00:00:00 2001
 From: Skynizz <182822215+Skynizz@users.noreply.github.com>
 Date: Sat, 24 Oct 2026 01:56:15 +0200
-Subject: [PATCH 3/9] =?UTF-8?q?KRC=20et=20SHaRC=20dans=20RTGL1=20(Doom=20R?=
- =?UTF-8?q?T),=20d=C3=A9bruiteur=20pilot=C3=A9=20par=20KRC,=20correctif=20?=
- =?UTF-8?q?du=20gradient=20A-SVGF?=
+Subject: [PATCH 3/9] KRC and SHaRC in RTGL1 (Doom RT), KRC-driven denoiser, A-SVGF gradient fix
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
 
-- Caches de radiance : SHaRC (SDK v1.8.3) et KRC, passes RtCache0..7, mode 3 de référence.
-- Correctif d'un bug de RTGL1 : l'échantillon de gradient relisait l'ancienne couleur des
-  lampes ; un changement d'intensité ne réinitialisait jamais l'historique (environ 100 frames
-  de traînée). KRC_FIX_GRADIENT=0 rend le comportement d'origine.
-- Rééclairage exact par groupes de lampes (secteur + forme), rapports calculés par le moteur.
-- KRC parle à A-SVGF : historiques direct, indirect et spéculaire rééclairés, gradient compensé,
-  indirect de KRC pris tel quel là où il est sûr.
-- Au point touché par un reflet, le second rebond est lu dans les cellules de KRC.
-- Outils : scénario de session (pause, mode, lampes, exposition, affichage), captures moyennées,
-  temps GPU par étape.
+- Radiance caches: SHaRC (SDK v1.8.3) and KRC, passes RtCache0..7, reference mode 3.
+- Fix for an RTGL1 bug: the gradient sample read the old colour of the
+  lamps again; an intensity change never reset the history (about 100 frames
+  of trailing). KRC_FIX_GRADIENT=0 restores the original behaviour.
+- Exact relighting by lamp groups (sector + shape), ratios computed by the engine.
+- KRC talks to A-SVGF: direct, indirect and specular histories relit, gradient compensated,
+  KRC's indirect taken as is where it is reliable.
+- At the point hit by a reflection, the second bounce is read from KRC's cells.
+- Tools: session script (pause, mode, lamps, exposure, display), averaged captures,
+  GPU time per stage.
 
 ---
  CMakeLists.txt                                |    2 +
@@ -106,7 +104,7 @@ index b52a9d7..498e490 100644
      "SBT_INDEX_RAYGEN_REFL_REFR"            : 1,
      "SBT_INDEX_RAYGEN_DIRECT"               : 2,
      "SBT_INDEX_RAYGEN_INDIRECT"             : 3,
-+    # caches de radiance (branche krc) : une passe par raygen, RtCache0..7.rgen
++    # radiance caches (krc branch): one pass per raygen, RtCache0..7.rgen
 +    "SBT_INDEX_RAYGEN_CACHE_0"              : 4,
 +    "SBT_INDEX_RAYGEN_CACHE_COUNT"          : 8,
      "SBT_INDEX_MISS_DEFAULT"                : 0,
@@ -116,23 +114,23 @@ index b52a9d7..498e490 100644
      (TYPE_FLOAT32,      1,      "_pad2",                            1),
      (TYPE_FLOAT32,      1,      "_pad3",                            1),
  
-+    # caches de radiance (branche krc) : adresses des buffers (paires de uint32) et réglages
-+    (TYPE_UINT32,       4,      "rcAddrA",                          1),  # SHaRC : clés, accumulation
-+    (TYPE_UINT32,       4,      "rcAddrB",                          1),  # SHaRC : résolu ; capacité ; frame
-+    (TYPE_UINT32,       4,      "rcAddrC",                          1),  # KRC : clés, valeurs
-+    (TYPE_UINT32,       4,      "rcAddrD",                          1),  # KRC : cellules, accumulateurs
-+    (TYPE_UINT32,       4,      "rcAddrE",                          1),  # KRC : compteurs, cellules visibles
-+    (TYPE_UINT32,       4,      "rcAddrF",                          1),  # KRC : liste libre, cellules des pixels
-+    (TYPE_UINT32,       4,      "rcAddrG",                          1),  # KRC : tâches, signaux du débruiteur
-+    (TYPE_UINT32,       4,      "rcAddrH",                          1),  # référence ; lampes actuel -> précédent (sphères, polygones)
-+    (TYPE_UINT32,       4,      "rcAddrI",                          1),  # lampes : actuel -> précédent (polygones)
-+    (TYPE_UINT32,       4,      "rcKrc",                            1),  # masque de la table, capacité, pixels max, -
++    # radiance caches (krc branch): buffer addresses (uint32 pairs) and settings
++    (TYPE_UINT32,       4,      "rcAddrA",                          1),  # SHaRC: keys, accumulation
++    (TYPE_UINT32,       4,      "rcAddrB",                          1),  # SHaRC: resolved; capacity; frame
++    (TYPE_UINT32,       4,      "rcAddrC",                          1),  # KRC: keys, values
++    (TYPE_UINT32,       4,      "rcAddrD",                          1),  # KRC: cells, accumulators
++    (TYPE_UINT32,       4,      "rcAddrE",                          1),  # KRC: counters, visible cells
++    (TYPE_UINT32,       4,      "rcAddrF",                          1),  # KRC: free list, pixel cells
++    (TYPE_UINT32,       4,      "rcAddrG",                          1),  # KRC: tasks, denoiser signals
++    (TYPE_UINT32,       4,      "rcAddrH",                          1),  # reference; lamps current -> previous (spheres, polygons)
++    (TYPE_UINT32,       4,      "rcAddrI",                          1),  # lamps: current -> previous (polygons)
++    (TYPE_UINT32,       4,      "rcKrc",                            1),  # table mask, capacity, max pixels, -
 +    (TYPE_FLOAT32,      4,      "rcCamPosPrev",                     1),
-+    (TYPE_FLOAT32,      4,      "rcParams0",                        1),  # méthode, débogage, échelle SHaRC, accumulation SHaRC
-+    (TYPE_FLOAT32,      4,      "rcParams1",                        1),  # frames périmées SHaRC, 1 pixel sur NxN, échelle radiance, rebonds
-+    (TYPE_FLOAT32,      4,      "rcParams2",                        1),  # KRC : chemins/px, taille cellule (px), historique, chemins corrélés
-+    (TYPE_FLOAT32,      4,      "rcParams3",                        1),  # KRC : détection, débruiteur intégré, dialogue, erreur admise
-+    (TYPE_FLOAT32,      4,      "rcParams4",                        1),  # référence : rebonds ; rééclairage par lampe ; -, -
++    (TYPE_FLOAT32,      4,      "rcParams0",                        1),  # method, debugging, SHaRC scale, SHaRC accumulation
++    (TYPE_FLOAT32,      4,      "rcParams1",                        1),  # SHaRC stale frames, 1 pixel per NxN, radiance scale, bounces
++    (TYPE_FLOAT32,      4,      "rcParams2",                        1),  # KRC: paths/px, cell size (px), history, correlated paths
++    (TYPE_FLOAT32,      4,      "rcParams3",                        1),  # KRC: detection, built-in denoiser, dialogue, accepted error
++    (TYPE_FLOAT32,      4,      "rcParams4",                        1),  # reference: bounces; per-lamp relighting; -, -
 +
      #(TYPE_FLOAT32,      1,      "_pad0",                            1),
      #(TYPE_FLOAT32,      1,      "_pad1",                            1),
@@ -280,7 +278,7 @@ index 141e352..ade0f6f 100644
      }
      buffer.Unmap();
  
-+    // moyenne : l'image s'écrit à la dernière frame de l'entrée
++    // mean: the image is written on the last frame of the entry
 +    accumulated++;
 +    if (accumulated < pendingCount)
 +    {
@@ -354,7 +352,7 @@ index 141e352..ade0f6f 100644
 +        double seconds = (double)(now.QuadPart - fpsStart) / (double)freq.QuadPart;
 +        if (FILE *f = std::fopen((dir + "/fps.txt").c_str(), "a"))
 +        {
-+            // GPU : image entière ; primaires et reflets ; direct ; passes du cache ; indirect ; débruiteur
++            // GPU: whole image; primaries and reflections; direct; cache passes; indirect; denoiser
 +            const double n = std::max(1u, gpuCount);
 +            std::fprintf(f, "frame %u mode %d fps %.2f ms %.3f gpu %.3f prim %.3f direct %.3f cache %.3f indirect %.3f denoise %.3f krcpix %.3f krctrace %.3f krcrest %.3f\n",
 +                         frameId, mode, fpsFrames / seconds, 1000.0 * seconds / fpsFrames, gpuSum[0] / n,
@@ -374,7 +372,7 @@ index 141e352..ade0f6f 100644
 +        if (c.key == "pause")
 +        {
 +#ifdef _WIN32
-+            // touche Pause (code de balayage 0x45), comme un appui au clavier
++            // Pause key (scan code 0x45), like a keyboard press
 +            if (window)
 +            {
 +                PostMessageA((HWND)window, WM_KEYDOWN, VK_PAUSE, (0x45 << 16) | 1);
@@ -422,7 +420,7 @@ index 141e352..ade0f6f 100644
 +    }
 +    if (halfGroup)
 +    {
-+        // une lampe sur deux, d'après un mélange de son identifiant (stable d'une frame à l'autre)
++        // one lamp out of two, from a hash of its identifier (stable from one frame to the next)
 +        uint64_t h = uniqueID * 0x9E3779B97F4A7C15ull;
 +        if (((h >> 32) & 1) == 0)
 +        {
@@ -452,7 +450,7 @@ index 141e352..ade0f6f 100644
 +uint32_t KrcLightGroups::Add(uint32_t type, uint64_t uniqueID, uint32_t sectorID, float radius, float falloff,
 +                             const float color[3])
 +{
-+    // forme quantifiée (rayon, portée) : sépare les lampes d'un secteur des objets lumineux
++    // quantised shape (radius, range): separates the lamps of a sector from glowing objects
 +    const auto q = [](float v) { return (uint64_t)std::max(0.0f, std::round(std::log2(1.0f + std::max(v, 0.0f)) * 4.0f)); };
 +    const uint64_t key = ((uint64_t)type << 62) ^ ((uint64_t)sectorID << 16) ^ (q(radius) << 8) ^ q(falloff);
 +
@@ -486,7 +484,7 @@ index 141e352..ade0f6f 100644
 +    auto prev = lumPrev.find(id);
 +    if (prev == lumPrev.end() || prev->second <= 0.0f)
 +    {
-+        s.unknown = true; // lampe nouvelle (ou éteinte avant) : rien à mettre à l'échelle
++        s.unknown = true; // new lamp (or off before): nothing to scale
 +    }
 +    else
 +    {
@@ -506,7 +504,7 @@ index 141e352..ade0f6f 100644
 +        const uint32_t before = i < countPrev.size() ? countPrev[i] : 0;
 +        if (s.count == 0)
 +        {
-+            ratios[i] = before > 0 ? 0.0f : 1.0f; // le groupe a disparu : sa lumière est partie
++            ratios[i] = before > 0 ? 0.0f : 1.0f; // the group disappeared: its light is gone
 +        }
 +        else if (s.unknown || s.count != before || s.rmax - s.rmin > 0.01f * s.rmax + 1e-6f)
 +        {
@@ -531,14 +529,14 @@ index 141e352..ade0f6f 100644
 +    {
 +        return;
 +    }
-+    // [0] : frame entière ; [1..5] : étapes successives
++    // [0]: whole frame; [1..5]: successive stages
 +    gpuSum[0] += ms[KrcGpuTimer::FRAME_END] - ms[KrcGpuTimer::FRAME_BEGIN];
 +    gpuSum[1] += ms[KrcGpuTimer::DIRECT_BEGIN] - ms[KrcGpuTimer::FRAME_BEGIN];
 +    gpuSum[2] += ms[KrcGpuTimer::CACHE_BEGIN] - ms[KrcGpuTimer::DIRECT_BEGIN];
 +    gpuSum[3] += ms[KrcGpuTimer::CACHE_END] - ms[KrcGpuTimer::CACHE_BEGIN];
 +    gpuSum[4] += ms[KrcGpuTimer::INDIRECT_END] - ms[KrcGpuTimer::CACHE_END];
 +    gpuSum[5] += ms[KrcGpuTimer::DENOISE_END] - ms[KrcGpuTimer::INDIRECT_END];
-+    // passes de KRC : pixels ; chemins ; le reste (éviction, résolution)
++    // KRC passes: pixels; paths; the rest (eviction, resolve)
 +    if (ms[KrcGpuTimer::CACHE_PIXEL] > 0.0)
 +    {
 +        gpuSum[6] += ms[KrcGpuTimer::CACHE_PIXEL] - ms[KrcGpuTimer::CACHE_BEGIN];
@@ -612,21 +610,21 @@ index 7af99bf..fb56897 100644
 --- a/Source/KrcTools.h
 +++ b/Source/KrcTools.h
 @@ -5,11 +5,23 @@
- //   KRC_CAPTURE=120,270,420   numéros de frame (depuis le lancement) à capturer
- //   KRC_CAPTURE_DIR=dossier   dossier des images (défaut : krc_captures)
- //   KRC_EXIT_AFTER=1          quitter après la dernière capture
-+// Une entrée « 600+256 » moyenne les 256 frames 600 à 855 en une seule image (référence).
- // Les images sont l'image finale avant l'interface du jeu, en PPM (sRGB 8 bits).
+ //   KRC_CAPTURE=120,270,420   frame numbers (since launch) to capture
+ //   KRC_CAPTURE_DIR=folder    image folder (default: krc_captures)
+ //   KRC_EXIT_AFTER=1          quit after the last capture
++// An entry "600+256" averages the 256 frames 600 to 855 into a single image (reference).
+ // The images are the final image before the game's UI, as PPM (8-bit sRGB).
 +//
-+// Scénario d'une session (KRC_SCRIPT), pour tout mesurer sur la même scène figée :
++// Session script (KRC_SCRIPT), to measure everything on the same frozen scene:
 +//   KRC_SCRIPT=60:pause;61:expo;100:mode=2;400:fps=200;700:light=0.2
-+//     pause      envoie la touche Pause à la fenêtre du jeu (la scène et ses lampes se figent)
-+//     expo       fige l'adaptation de l'exposition
-+//     mode=N     change de méthode (KRC_MODE) ; les caches repartent de zéro
-+//     fps=N      mesure la cadence sur N frames, ajoutée à <KRC_CAPTURE_DIR>/fps.txt
-+//     light=S    multiplie la couleur des lampes du groupe choisi par S (1 : rétablit)
-+//     group=all|half   groupe touché par light (half : une lampe sur deux, selon son uniqueID)
-+//     show=N     affichage de débogage de RTGL1 (DEBUG_SHOW_FLAG_*, 32 : indirect non filtré)
++//     pause      sends the Pause key to the game window (the scene and its lamps freeze)
++//     expo       freezes exposure adaptation
++//     mode=N     switches method (KRC_MODE); the caches start again from zero
++//     fps=N      measures the frame rate over N frames, appended to <KRC_CAPTURE_DIR>/fps.txt
++//     light=S    multiplies the colour of the chosen group's lamps by S (1: restores)
++//     group=all|half   group affected by light (half: one lamp out of two, by its uniqueID)
++//     show=N     RTGL1 debug display (DEBUG_SHOW_FLAG_*, 32: unfiltered indirect)
  
  #pragma once
  
@@ -643,25 +641,25 @@ index 7af99bf..fb56897 100644
 +    uint32_t pendingWidth = 0, pendingHeight = 0, pendingFrame = 0, pendingStart = 0, pendingCount = 1;
      size_t written = 0;
 +
-+    // moyenne de plusieurs frames (entrée « f+N »)
++    // mean of several frames (entry "f+N")
 +    std::vector<uint32_t> counts;
 +    std::vector<float> sum;
 +    uint32_t accumulated = 0;
 +};
 +
-+// Groupes de lampes pour le rééclairage exact de KRC. Un groupe : les lampes d'un même secteur et
-+// de même forme (dans Doom, les lampes d'un secteur suivent ensemble son niveau de lumière). Le
-+// moteur connaît la couleur de chaque lampe avant et après : le rapport du groupe est exact s'il
-+// est le même pour toutes ses lampes, sinon il est déclaré inconnu (-1) et KRC le mesure.
++// Lamp groups for KRC's exact relighting. A group: the lamps of the same sector with the
++// same shape (in Doom, a sector's lamps follow its light level together). The
++// engine knows each lamp's colour before and after: the group's ratio is exact if it
++// is the same for all its lamps, otherwise it is declared unknown (-1) and KRC measures it.
 +class KrcLightGroups
 +{
 +public:
 +    static constexpr uint32_t MAX_GROUPS = 16384;
 +
 +    void BeginFrame();
-+    // emplacement du groupe de la lampe + 1 (0 : aucun)
++    // slot of the lamp's group + 1 (0: none)
 +    uint32_t Add(uint32_t type, uint64_t uniqueID, uint32_t sectorID, float radius, float falloff, const float color[3]);
-+    // rapport « après / avant » de chaque groupe (indice : emplacement), -1 s'il n'est pas sûr
++    // "after / before" ratio of each group (index: slot), -1 if it is not reliable
 +    const std::vector<float> &Ratios() const;
 +
 +private:
@@ -678,28 +676,28 @@ index 7af99bf..fb56897 100644
 +    mutable std::vector<float> ratios;
 +};
 +
-+// Temps GPU des étapes de la frame (horodatages Vulkan), relus quand la frame est terminée et
-+// moyennés par la mesure « fps=N » du scénario.
++// GPU time of the frame's stages (Vulkan timestamps), read back when the frame is done and
++// averaged by the script's "fps=N" measurement.
 +class KrcGpuTimer
 +{
 +public:
 +    enum Mark : uint32_t
 +    {
-+        FRAME_BEGIN,   // avant les rayons primaires
-+        DIRECT_BEGIN,  // avant la lumière directe
-+        CACHE_BEGIN,   // avant les passes du cache
-+        CACHE_PIXEL,   // KRC : après la passe des pixels (insertion, répartition des chemins)
-+        CACHE_TRACE,   // KRC : après les chemins
-+        CACHE_END,     // après les passes du cache, avant l'indirect
-+        INDIRECT_END,  // après l'indirect
-+        DENOISE_END,   // après le débruiteur
-+        FRAME_END,     // image finale, avant l'interface
++        FRAME_BEGIN,   // before the primary rays
++        DIRECT_BEGIN,  // before the direct light
++        CACHE_BEGIN,   // before the cache passes
++        CACHE_PIXEL,   // KRC: after the pixel pass (insertion, path distribution)
++        CACHE_TRACE,   // KRC: after the paths
++        CACHE_END,     // after the cache passes, before the indirect
++        INDIRECT_END,  // after the indirect
++        DENOISE_END,   // after the denoiser
++        FRAME_END,     // final image, before the UI
 +        MARK_COUNT
 +    };
 +
 +    void Init(VkDevice device, VkPhysicalDevice physDevice);
 +    void Destroy(VkDevice device);
-+    // au début de la frame (après l'attente de sa barrière) : lit la frame précédente de cet indice
++    // at the start of the frame (after waiting for its fence): reads the previous frame of this index
 +    void Collect(VkDevice device, VkCommandBuffer cmd, uint32_t frameIndex);
 +    void Write(VkCommandBuffer cmd, uint32_t frameIndex, Mark m);
 +
@@ -709,21 +707,21 @@ index 7af99bf..fb56897 100644
 +    bool written[MAX_FRAMES_IN_FLIGHT] = {};
 +};
 +
-+// scénario de la session, lu dans KRC_SCRIPT ; état global consulté par le moteur
++// session script, read from KRC_SCRIPT; global state queried by the engine
 +class KrcScript
 +{
 +public:
 +    static KrcScript &Get();
 +
 +    void Init(void *hwnd);
-+    // à appeler une fois par frame, avant de remplir les données de la frame
++    // to call once per frame, before filling the frame data
 +    void Frame(uint32_t frameId);
 +
 +    int Mode(int current) const { return mode >= 0 ? mode : current; }
 +    bool ExposureFrozen() const { return exposureFrozen; }
 +    uint32_t ShowFlags() const { return showFlags; }
 +    float LightScale(uint64_t uniqueID) const;
-+    // temps GPU d'une frame, en ms par étape (KrcGpuTimer::Mark)
++    // GPU time of a frame, in ms per stage (KrcGpuTimer::Mark)
 +    void GpuSample(const double ms[KrcGpuTimer::MARK_COUNT]);
 +
 +private:
@@ -783,7 +781,7 @@ index cc218a7..8f96114 100644
 +
 +    if (index.GetArrayIndex() < curToPrevSph.size())
 +    {
-+        // indice de la même lampe dans la frame précédente, et son groupe (rééclairage de KRC)
++        // index of the same lamp in the previous frame, and its group (KRC relighting)
 +        const auto &prevMap = sphericalUniqueIDToPrevIndex[(frameIndex + 1) % MAX_FRAMES_IN_FLIGHT];
 +        auto found = prevMap.find(info.uniqueID);
 +        const ShLightSpherical &lt = dst[index.GetArrayIndex()];
@@ -805,7 +803,7 @@ index cc218a7..8f96114 100644
 +
 +    if (index.GetArrayIndex() < curToPrevPoly.size())
 +    {
-+        // indice de la même lampe dans la frame précédente, et son groupe (rééclairage de KRC)
++        // index of the same lamp in the previous frame, and its group (KRC relighting)
 +        const auto &prevMap = polygonalUniqueIDToPrevIndex[(frameIndex + 1) % MAX_FRAMES_IN_FLIGHT];
 +        auto found = prevMap.find(info.uniqueID);
 +        const uint32_t group = krcGroups.Add(2, info.uniqueID, info.sectorID, 0, 0, dst[index.GetArrayIndex()].color);
@@ -838,9 +836,9 @@ index 8f8ea25..e331938 100644
  
      void CopyFromStaging(VkCommandBuffer cmd, uint32_t frameIndex);
  
-+    // caches de radiance (branche krc) : pour chaque lampe de la frame, son indice dans la
-+    // frame précédente (UINT32_MAX si elle est nouvelle) ; sert aux chemins corrélés
-+    // par lampe de la frame : (groupe + 1) << 16 | indice dans la frame précédente (0xffff : aucune)
++    // radiance caches (krc branch): for each lamp of the frame, its index in the
++    // previous frame (UINT32_MAX if it is new); used by the correlated paths
++    // per lamp of the frame: (group + 1) << 16 | index in the previous frame (0xffff: none)
 +    const std::vector<uint32_t> &GetCurToPrevSpherical() const { return curToPrevSph; }
 +    const std::vector<uint32_t> &GetCurToPrevPolygonal() const { return curToPrevPoly; }
 +    const KrcLightGroups &GetKrcGroups() const { return krcGroups; }
@@ -882,12 +880,12 @@ index 0000000..890515a
 +constexpr uint32_t SHARC_CAPACITY = 1u << 22;
 +constexpr uint32_t KRC_TABLE = 1u << 22;
 +constexpr uint32_t KRC_CELLS = 1u << 20;
-+constexpr uint32_t KRC_CELL_SIZE = 96;   // octets, struct KrcCell (Shaders/RadianceCache.h)
-+constexpr uint32_t KRC_ACC = 21;         // accumulateurs 64 bits par cellule
++constexpr uint32_t KRC_CELL_SIZE = 96;   // bytes, struct KrcCell (Shaders/RadianceCache.h)
++constexpr uint32_t KRC_ACC = 21;         // 64-bit accumulators per cell
 +constexpr uint32_t KRC_CTR = 64;
 +constexpr uint32_t KRC_K = 4;
 +constexpr uint32_t KRC_MAX_PIXELS = 2560u * 1600u;
-+constexpr uint32_t MAX_LIGHTS_MAPPED = 4096;    // ≥ nombre max de lampes de LightManager.cpp
++constexpr uint32_t MAX_LIGHTS_MAPPED = 4096;    // ≥ max number of lamps in LightManager.cpp
 +
 +float EnvFloat(const char *name, float def)
 +{
@@ -910,7 +908,7 @@ index 0000000..890515a
 +{
 +    mode = (int)EnvFloat("KRC_MODE", 0);
 +
-+    // méthode, débogage, échelle SHaRC (50 : exemple du SDK ; voxel ≈ distance / échelle), accumulation
++    // method, debugging, SHaRC scale (50: SDK sample; voxel ≈ distance / scale), accumulation
 +    float p[5][4] = {
 +        { (float)mode, EnvFloat("KRC_DEBUG", 0), EnvFloat("SHARC_SCENE_SCALE", 50), EnvFloat("SHARC_ACCUM", 20) },
 +        { EnvFloat("SHARC_STALE", 64), EnvFloat("SHARC_DOWNSCALE", 5), EnvFloat("SHARC_RADIANCE_SCALE", 1000), EnvFloat("KRC_BOUNCES", 4) },
@@ -972,7 +970,7 @@ index 0000000..890515a
 +
 +void RadianceCache::FillUniform(ShGlobalUniform *gu, uint32_t frameIndex, uint32_t frameId, const LightManager &lights)
 +{
-+    // changement de méthode en cours de session : les caches repartent de zéro
++    // method change during a session: the caches start again from zero
 +    const int scripted = KrcScript::Get().Mode(mode);
 +    if (scripted != mode)
 +    {
@@ -1017,7 +1015,7 @@ index 0000000..890515a
 +    std::memcpy(gu->rcParams3, params[3], sizeof(params[3]));
 +    std::memcpy(gu->rcParams4, params[4], sizeof(params[4]));
 +
-+    // groupes de lampes : rapport exact de la frame
++    // lamp groups: exact ratio of the frame
 +    const auto &ratios = lights.GetKrcGroups().Ratios();
 +    if (!ratios.empty())
 +    {
@@ -1026,7 +1024,7 @@ index 0000000..890515a
 +        groupRatio[frameIndex].Unmap();
 +    }
 +
-+    // lampes : indice dans la frame précédente
++    // lamps: index in the previous frame
 +    const auto &sph = lights.GetCurToPrevSpherical();
 +    const auto &poly = lights.GetCurToPrevPolygonal();
 +    if (!sph.empty())
@@ -1074,7 +1072,7 @@ index 0000000..890515a
 +{
 +    if (mode != 2)
 +    {
-+        // repères des passes de KRC : toujours écrits, pour que la frame soit lisible
++        // markers of the KRC passes: always written, so that the frame can be read
 +        timer.Write(cmd, frameIndex, KrcGpuTimer::CACHE_PIXEL);
 +        timer.Write(cmd, frameIndex, KrcGpuTimer::CACHE_TRACE);
 +    }
@@ -1092,14 +1090,14 @@ index 0000000..890515a
 +
 +    if (mode == 1)
 +    {
-+        // SHaRC : Update (un pixel par bloc NxN), Resolve (toutes les entrées)
++        // SHaRC: Update (one pixel per NxN block), Resolve (every entry)
 +        uint32_t ds = (uint32_t)std::max(1.0f, params[1][1]);
 +        Dispatch(cmd, rtPipeline, 0, (width + ds - 1) / ds, (height + ds - 1) / ds);
 +        Dispatch(cmd, rtPipeline, 1, 4096, SHARC_CAPACITY / 4096);
 +    }
 +    else if (mode == 2)
 +    {
-+        // KRC : compteurs, cellules des pixels (Neyman), chemins (tâches), liste libre, éviction, résolution
++        // KRC: counters, pixel cells (Neyman), paths (tasks), free list, eviction, resolve
 +        Dispatch(cmd, rtPipeline, 2, 1, 1);
 +        Dispatch(cmd, rtPipeline, 3, width, height);
 +        timer.Write(cmd, frameIndex, KrcGpuTimer::CACHE_PIXEL);
@@ -1111,7 +1109,7 @@ index 0000000..890515a
 +    }
 +    else if (mode == 3)
 +    {
-+        // référence : un chemin complet par pixel
++        // reference: one full path per pixel
 +        Dispatch(cmd, rtPipeline, 3, width, height);
 +    }
 +}
@@ -1125,13 +1123,13 @@ index 0000000..b93c3a5
 @@ -0,0 +1,57 @@
 +// Copyright (c) 2026 Skynizz
 +//
-+// Caches de radiance de l'indirect, à comparer dans le jeu (branche krc) :
-+//   KRC_MODE=0  rendu d'origine de RTGL1 (rebonds tracés, sans cache)
-+//   KRC_MODE=1  SHaRC, SDK officiel de NVIDIA v1.8.3 (Shaders/sharc/), réglages de son exemple
++// Radiance caches of the indirect, to compare in the game (krc branch):
++//   KRC_MODE=0  original RTGL1 rendering (traced bounces, no cache)
++//   KRC_MODE=1  SHaRC, official NVIDIA SDK v1.8.3 (Shaders/sharc/), settings of its sample
 +//   KRC_MODE=2  KRC
-+//   KRC_MODE=3  référence : chemins complets sans cache (à accumuler)
-+// Les réglages se lisent dans des variables d'environnement au lancement (voir Init).
-+// Les passes (raygens RtCache0..7) tournent entre l'éclairage direct et l'indirect.
++//   KRC_MODE=3  reference: full paths without a cache (to be accumulated)
++// The settings are read from environment variables at launch (see Init).
++// The passes (raygens RtCache0..7) run between direct lighting and the indirect.
 +
 +#pragma once
 +
@@ -1203,7 +1201,7 @@ index 6c863e3..412f2f5 100644
      AddRayGenGroup(toIndex("RGenReflRefr"));                        assert(raygenShaderCount - 1 == SBT_INDEX_RAYGEN_REFL_REFR);
      AddRayGenGroup(toIndex("RGenDirect"));                          assert(raygenShaderCount - 1 == SBT_INDEX_RAYGEN_DIRECT);
      AddRayGenGroup(toIndex("RGenIndirect"));                        assert(raygenShaderCount - 1 == SBT_INDEX_RAYGEN_INDIRECT);
-+    // caches de radiance : une passe par raygen
++    // radiance caches: one pass per raygen
 +    {
 +        const char *cacheNames[SBT_INDEX_RAYGEN_CACHE_COUNT] = {
 +            "RGenCache0", "RGenCache1", "RGenCache2", "RGenCache3",
@@ -1271,7 +1269,7 @@ index e240805..062d404 100644
      const ivec2 posInStrata = ivec2(grFB.x % COMPUTE_ASVGF_STRATA_SIZE, grFB.x / COMPUTE_ASVGF_STRATA_SIZE);
      const ivec2 shadingSamplePix = gradPix * COMPUTE_ASVGF_STRATA_SIZE + posInStrata;
  
-+    // KRC : le changement qu'il a expliqué (et appliqué à l'historique) n'est pas un écart
++    // KRC: the change it explained (and applied to the history) is not a gap
 +    if (krc_talks())
 +    {
 +        const vec4 s = krc_denoiser_signal(shadingSamplePix);
@@ -1307,15 +1305,15 @@ index 6d7123c..820e594 100644
      }
      
  
-+    // KRC : l'historique est rééclairé du rapport que KRC connaît (exact pour les lampes suivies),
-+    // au lieu d'être jeté par l'anti-retard ou de traîner
++    // KRC: the history is relit by the ratio KRC knows (exact for tracked lamps),
++    // instead of being dropped by the anti-lag or trailing
 +    vec4 krcSignal = vec4(1.0, 0.0, 1.0, 0.0);
 +    if (krc_talks())
 +    {
 +        krcSignal = krc_denoiser_signal(pix);
 +        diffPrev *= krcSignal.x;
 +        momentsPrev *= vec2(krcSignal.x, krcSignal.x * krcSignal.x);
-+        // spéculaire : rapport propre (les reflets des surfaces émissives ne changent pas)
++        // specular: its own ratio (reflections of emissive surfaces do not change)
 +        specPrev *= krcSignal.w;
 +        multiplySH(indirPrev, krcSignal.z);
 +    }
@@ -1327,8 +1325,8 @@ index 6d7123c..820e594 100644
              float alphaColor = max(minAlpha, 1.0 / indirHistoryLength);
  
              alphaColor = mix(alphaColor, 1.0, antilagAlpha_Indir);
-+            // KRC : son indirect est déjà la moyenne de l'historique des cellules ; là où il est
-+            // sûr, il est pris tel quel (ni retard, ni double filtrage)
++            // KRC: its indirect is already the mean of the cells' history; where it is
++            // reliable, it is taken as is (no lag, no double filtering)
 +            if (krc_owns_indirect())
 +            {
 +                alphaColor = mix(alphaColor, 1.0, krcSignal.y);
@@ -1344,26 +1342,26 @@ index 0000000..18e3749
 @@ -0,0 +1,35 @@
 +// Copyright (c) 2026 Skynizz
 +//
-+// Ce que KRC dit au débruiteur (A-SVGF), par pixel ; écrit par RtRaygenIndirect dans la même
-+// frame (voir krc_smooth_indirect, RadianceCache.h). Requiert RadianceCacheExt.h et globalUniform.
-+//   x : rapport « après / avant » de la lumière directe, exact quand les lampes sont suivies
-+//   y : confiance de l'indirect de KRC (0 à 1)
-+//   z : rapport « après / avant » de l'indirect
-+//   w : rapport « après / avant » du spéculaire (direct et reflet)
++// What KRC tells the denoiser (A-SVGF), per pixel; written by RtRaygenIndirect in the same
++// frame (see krc_smooth_indirect, RadianceCache.h). Requires RadianceCacheExt.h and globalUniform.
++//   x: "after / before" ratio of the direct light, exact when the lamps are tracked
++//   y: confidence of KRC's indirect (0 to 1)
++//   z: "after / before" ratio of the indirect
++//   w: "after / before" ratio of the specular (direct and reflection)
 +
 +#ifndef KRC_DENOISER_H_
 +#define KRC_DENOISER_H_
 +
 +layout(buffer_reference, std430, buffer_reference_align = 16) buffer KrcDenoiserSignal { vec4 v[]; };
 +
-+// KRC est actif et parle au débruiteur
++// KRC is active and talks to the denoiser
 +bool krc_talks()
 +{
 +    return int(globalUniform.rcParams0.x) == 2 && globalUniform.rcParams3.z != 0 &&
 +           uint(globalUniform.renderWidth) * uint(globalUniform.renderHeight) <= globalUniform.rcKrc.z;
 +}
 +
-+// l'indirect de KRC, déjà filtré dans le temps par les cellules, remplace l'historique
++// KRC's indirect, already filtered over time by the cells, replaces the history
 +bool krc_owns_indirect()
 +{
 +    return krc_talks() && globalUniform.rcParams3.y != 0;
@@ -1385,19 +1383,19 @@ index 0000000..d7c2090
 @@ -0,0 +1,331 @@
 +// Copyright (c) 2026 Skynizz
 +//
-+// Caches de radiance de l'indirect (branche krc), partie commune aux passes (RtCache.inl) et à
-+// leur lecture (RtRaygenIndirect.rgen). Méthode choisie par KRC_MODE (voir RadianceCache.h C++) :
-+//   1 : SHaRC, SDK officiel de NVIDIA v1.8.3 (sharc/), non modifié, réglages de son exemple ;
-+//   2 : KRC ;  3 : référence (chemins complets sans cache).
-+// À inclure après RaygenCommon.h (les macros du SDK, lerp, saturate…, ne doivent pas toucher
-+// le code de RTGL1 inclus avant). Il faut les extensions de RadianceCacheExt.h.
++// Radiance caches of the indirect (krc branch), part shared by the passes (RtCache.inl) and
++// their reading (RtRaygenIndirect.rgen). Method chosen by KRC_MODE (see RadianceCache.h C++):
++//   1: SHaRC, official NVIDIA SDK v1.8.3 (sharc/), unmodified, settings of its sample;
++//   2: KRC;  3: reference (full paths without a cache).
++// Include after RaygenCommon.h (the SDK macros, lerp, saturate…, must not affect
++// the RTGL1 code included before). The extensions of RadianceCacheExt.h are needed.
 +
 +#ifndef RADIANCE_CACHE_H_
 +#define RADIANCE_CACHE_H_
 +
 +#define SHARC_ENABLE_GLSL 1
-+#define SHARC_MATERIAL_DEMODULATION 1    // comme l'exemple Pathtracer du SDK
-+#define SHARC_ENABLE_FADE_ACCELERATION 1 // option du SDK : convergence accélérée quand la lumière baisse
++#define SHARC_MATERIAL_DEMODULATION 1    // like the SDK Pathtracer sample
++#define SHARC_ENABLE_FADE_ACCELERATION 1 // SDK option: faster convergence when the light drops
 +#ifndef SHARC_UPDATE
 +#define SHARC_UPDATE 0
 +#endif
@@ -1413,7 +1411,7 @@ index 0000000..d7c2090
 +#define CACHE_KRC   2
 +#define CACHE_REF   3
 +
-+// ---------------------------------------------------------------- accès au UBO de RTGL1
++// ---------------------------------------------------------------- access to the RTGL1 UBO
 +#define RC_CAM_POS          (globalUniform.cameraPosition.xyz)
 +#define RC_WIDTH            (uint(globalUniform.renderWidth))
 +#define RC_HEIGHT           (uint(globalUniform.renderHeight))
@@ -1451,15 +1449,15 @@ index 0000000..d7c2090
 +    return getLuminance(c);
 +}
 +
-+// référence (mode 3) : par pixel, v[2 i] = indirect (rgb), v[2 i + 1] = direction du premier rebond
++// reference (mode 3): per pixel, v[2 i] = indirect (rgb), v[2 i + 1] = direction of the first bounce
 +layout(buffer_reference, std430, buffer_reference_align = 16) buffer RefIndirect { vec4 v[]; };
 +RefIndirect ref_indirect() { return RefIndirect(rc_address(globalUniform.rcAddrH.xy)); }
 +
-+// lampes de la frame : (groupe + 1) << 16 | indice dans la frame précédente (0xffff : nouvelle)
++// lamps of the frame: (group + 1) << 16 | index in the previous frame (0xffff: new)
 +layout(buffer_reference, std430, buffer_reference_align = 4) buffer RcU32 { uint v[]; };
 +RcU32 rc_cur_to_prev_sph() { return RcU32(rc_address(globalUniform.rcAddrH.zw)); }
 +RcU32 rc_cur_to_prev_poly() { return RcU32(rc_address(globalUniform.rcAddrI.xy)); }
-+// groupes de lampes : rapport « après / avant » exact de la frame, -1 s'il n'est pas sûr
++// lamp groups: exact "after / before" ratio of the frame, -1 if it is not reliable
 +layout(buffer_reference, std430, buffer_reference_align = 4) buffer RcF32 { float v[]; };
 +RcF32 rc_group_ratio() { return RcF32(rc_address(globalUniform.rcAddrI.zw)); }
 +#define KRC_MAX_GROUPS 16384u   // KrcLightGroups::MAX_GROUPS
@@ -1479,7 +1477,7 @@ index 0000000..d7c2090
 +    return p;
 +}
 +
-+// démodulation par l'albédo (le cache stocke la lumière ÷ albédo ; la texture est remise à la
++// demodulation by the albedo (the cache stores light ÷ albedo; the texture is put back on
 +// lecture)
 +vec3 rc_demodulation(vec3 albedo)
 +{
@@ -1487,9 +1485,9 @@ index 0000000..d7c2090
 +}
 +
 +// ========================================================================== //
-+// KRC (mode 2). Cellules en espace monde, de taille ≈ KRC_CELL_PX pixels à l'écran (niveaux en
-+// puissances de 2 selon la distance) et par orientation. Une cellule stocke la même grandeur que
-+// le canal d'indirect diffus de RTGL1 (contribution du rebond diffus, sans l'albédo du pixel).
++// KRC (mode 2). World-space cells, sized ≈ KRC_CELL_PX pixels on screen (power-of-2
++// levels by distance) and per orientation. A cell stores the same quantity as
++// RTGL1's diffuse indirect channel (contribution of the diffuse bounce, without the pixel's albedo).
 +// ========================================================================== //
 +
 +layout(buffer_reference, std430, buffer_reference_align = 4) buffer KrcU32 { uint v[]; };
@@ -1498,21 +1496,21 @@ index 0000000..d7c2090
 +struct KrcCell
 +{
 +    vec3 mean;      // indirect moyen
-+    float n;        // échantillons dans l'historique (plafonné à KRC_HIST)
++    float n;        // samples in the history (capped at KRC_HIST)
 +    float lmean;    // luminance moyenne
-+    float var;      // variance par échantillon de la luminance (moyenne glissante)
-+    uint seen;      // dernière frame (horloge KRC) où la cellule a servi
++    float var;      // per-sample variance of the luminance (running mean)
++    uint seen;      // last frame (KRC clock) where the cell was used
 +    uint key;
-+    uint slot;      // case de la table + 1 (0 : libre)
-+    float sigma;    // écart-type par échantillon (allocation de Neyman)
++    uint slot;      // table slot + 1 (0: free)
++    float sigma;    // per-sample standard deviation (Neyman allocation)
 +    uint born;
-+    float change;   // la lumière vient de changer ici (0 à 1)
-+    vec3 dir;       // direction moyenne de la lumière arrivante, pondérée par son intensité
-+    float relight;  // rapport « après / avant » de la lumière directe dans la frame
-+    uvec2 lights;   // rééclairage exact : les deux lampes principales (type << 30 | indice de la frame)
-+    vec2 share;     // ... leur part de l'indirect de la cellule
-+    vec2 dshare;    // ... leur part de la lumière directe au point de départ
-+    float relightInd; // rapport « après / avant » de l'indirect de la cellule dans la frame
++    float change;   // the light just changed here (0 to 1)
++    vec3 dir;       // mean direction of the incoming light, weighted by its intensity
++    float relight;  // "after / before" ratio of the direct light in the frame
++    uvec2 lights;   // exact relighting: the two main lamps (type << 30 | index in the frame)
++    vec2 share;     // ... their share of the cell's indirect
++    vec2 dshare;    // ... their share of the direct light at the start point
++    float relightInd; // "after / before" ratio of the cell's indirect in the frame
 +    float pad;
 +};
 +layout(buffer_reference, std430, buffer_reference_align = 16) buffer KrcCells { KrcCell c[]; };
@@ -1521,20 +1519,20 @@ index 0000000..d7c2090
 +#define KRC_NONE     0xffffffffu
 +#define KRC_TOMB     0xffffffffu
 +#define KRC_FX       65536.0
-+// accumulateurs par cellule (64 bits, virgule fixe KRC_FX)
++// accumulators per cell (64 bits, KRC_FX fixed point)
 +#define KRC_ACC      21
-+#define KRC_A_FOOT   0   // la cellule est lue dans la frame
-+#define KRC_A_FN     1   // échantillons de la frame
++#define KRC_A_FOOT   0   // the cell is read in the frame
++#define KRC_A_FN     1   // samples of the frame
 +#define KRC_A_SUM    2   // 2..4 : somme rgb
 +#define KRC_A_LUM    5
 +#define KRC_A_LUM2   6
-+#define KRC_A_DELTA  7   // 7..9 : somme rgb des différences « après - avant » (signée)
-+#define KRC_A_DIR    10  // 10..12 : somme de luminance × direction du premier rebond (signée)
-+#define KRC_A_D0NEW  13  // luminance de la lumière directe au point de départ (frame)
-+#define KRC_A_D0OLD  14  // ... la même avec la lumière de la frame précédente
-+#define KRC_A_LID    15  // 15..16 : lampes suivies (type << 30 | indice), 0 : libre
-+#define KRC_A_LIND   17  // 17..18 : part de l'indirect due à ces lampes (luminance)
-+#define KRC_A_LDIR   19  // 19..20 : part de la lumière directe au départ due à ces lampes
++#define KRC_A_DELTA  7   // 7..9: rgb sum of the "after - before" differences (signed)
++#define KRC_A_DIR    10  // 10..12: sum of luminance × direction of the first bounce (signed)
++#define KRC_A_D0NEW  13  // luminance of the direct light at the start point (frame)
++#define KRC_A_D0OLD  14  // ... the same with the previous frame's light
++#define KRC_A_LID    15  // 15..16: tracked lamps (type << 30 | index), 0: free
++#define KRC_A_LIND   17  // 17..18: share of the indirect due to these lamps (luminance)
++#define KRC_A_LDIR   19  // 19..20: share of the direct light at the start due to these lamps
 +// compteurs (64 bits)
 +#define KRC_C_CELLS     0
 +#define KRC_C_NVIS      1
@@ -1558,8 +1556,8 @@ index 0000000..d7c2090
 +KrcU32 krc_pix()     { return KrcU32(rc_address(globalUniform.rcAddrF.zw)); }
 +KrcU32 krc_tasks()   { return KrcU32(rc_address(globalUniform.rcAddrG.xy)); }
 +
-+// signaux pour le débruiteur, par pixel : x = rapport « après / avant » de la lumière directe
-+// (1 : rien n'a changé), y = confiance de l'estimation de KRC (0 à 1), z = rapport de l'indirect
++// signals for the denoiser, per pixel: x = "after / before" ratio of the direct light
++// (1: nothing changed), y = confidence of KRC's estimate (0 to 1), z = ratio of the indirect
 +layout(buffer_reference, std430, buffer_reference_align = 16) buffer KrcSignal { vec4 v[]; };
 +KrcSignal krc_signal() { return KrcSignal(rc_address(globalUniform.rcAddrG.zw)); }
 +
@@ -1582,7 +1580,7 @@ index 0000000..d7c2090
 +    return h;
 +}
 +
-+// angle (en radians) couvert par un pixel
++// angle (in radians) covered by a pixel
 +float krc_pixel_angle()
 +{
 +    return 2.0 / (abs(globalUniform.projection[1][1]) * float(RC_HEIGHT));
@@ -1602,8 +1600,8 @@ index 0000000..d7c2090
 +    return (an.x >= an.y && an.x >= an.z) ? 0u : ((an.y >= an.z) ? 1u : 2u);
 +}
 +
-+// orientation de la cellule : axe dominant et signe (6 faces), puis l'inclinaison dans chacun
-+// des deux autres axes en 3 classes (9)
++// orientation of the cell: dominant axis and sign (6 faces), then the tilt along each
++// of the other two axes in 3 classes (9)
 +uint krc_face(vec3 n, uint axis)
 +{
 +    float na = (axis == 0u) ? n.x : ((axis == 1u) ? n.y : n.z);
@@ -1627,7 +1625,7 @@ index 0000000..d7c2090
 +    return h;
 +}
 +
-+// clé de la cellule du point p ; décalage jitter (fractions de cellule) dans le plan de la face
++// key of the cell of point p; jitter offset (fractions of a cell) in the plane of the face
 +uint krc_key(vec3 p, vec3 n, float dist, vec3 jitter, out float size)
 +{
 +    int level = krc_level(dist, size);
@@ -1657,9 +1655,9 @@ index 0000000..d7c2090
 +    return KRC_NONE;
 +}
 +
-+// Débruiteur intégré : indirect d'un point reconstruit à partir des 4 cellules voisines dans le
-+// plan de sa face (interpolation bilinéaire), pondérées par leur confiance. Déterministe : rien à
-+// accumuler ni à filtrer ensuite.
++// Built-in denoiser: indirect of a point reconstructed from the 4 neighbouring cells in the
++// plane of its face (bilinear interpolation), weighted by their confidence. Deterministic: nothing to
++// accumulate or filter afterwards.
 +bool krc_smooth_indirect(vec3 p, vec3 n, out vec3 value, out vec4 signal, out vec3 dir)
 +{
 +    value = vec3(0);
@@ -1722,8 +1720,8 @@ index 0000000..8ef80d4
 @@ -0,0 +1,13 @@
 +// Copyright (c) 2026 Skynizz
 +//
-+// Extensions requises par les caches de radiance (SDK SHaRC, KRC). À inclure juste après
-+// #version, avant tout code.
++// Extensions required by the radiance caches (SHaRC SDK, KRC). Include right after
++// #version, before any code.
 +
 +#extension GL_EXT_buffer_reference : require
 +#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
@@ -1742,8 +1740,8 @@ index f634b63..d2cc06e 100644
          }
  
 -        sphLight = lightSourcesSpherical_Prev[sphLightIndex];
-+        // (branche krc) l'indice est celui de la frame courante : sans correctif, l'ancienne couleur
-+        // était relue et un changement d'intensité ne donnait aucun gradient (historique gardé)
++        // (krc branch) the index is the current frame's: without this fix, the old colour
++        // was read again and an intensity change gave no gradient (history kept)
 +        sphLight = globalUniform.rcParams4.z != 0 ? lightSourcesSpherical[sphLightIndex] : lightSourcesSpherical_Prev[sphLightIndex];
      }
  
@@ -1765,16 +1763,16 @@ index 0000000..73c6d17
 @@ -0,0 +1,1030 @@
 +// Copyright (c) 2026 Skynizz
 +//
-+// Passes des caches de radiance (branche krc), entre l'éclairage direct et l'indirect. Chaque
-+// fichier RtCacheN.rgen définit CACHE_PASS puis inclut ce fichier :
-+//   0 : SHaRC Update (un pixel par bloc NxN, chemin diffus depuis la surface primaire)
-+//   1 : SHaRC Resolve (toutes les entrées)
-+//   2 : KRC, compteurs de la frame          3 : KRC, cellules des pixels et tâches (Neyman)
-+//                                               (mode 3 : chemin de référence par pixel)
-+//   4 : KRC, liste libre                     5 : KRC, éviction
-+//   6 : KRC, résolution (chemins corrélés)   7 : KRC, chemins des tâches
-+// L'éclairage de chaque sommet est celui de RTGL1, en diffus comme ses rebonds ; KRC évalue en
-+// plus chaque lampe avec son état de la frame précédente (même tirage) : chemins corrélés.
++// Passes of the radiance caches (krc branch), between direct lighting and the indirect. Each
++// RtCacheN.rgen file defines CACHE_PASS and then includes this file:
++//   0: SHaRC Update (one pixel per NxN block, diffuse path from the primary surface)
++//   1: SHaRC Resolve (every entry)
++//   2: KRC, frame counters                  3: KRC, pixel cells and tasks (Neyman)
++//                                               (mode 3: reference path per pixel)
++//   4: KRC, free list                        5: KRC, eviction
++//   6: KRC, resolve (correlated paths)       7: KRC, task paths
++// The lighting of each vertex is RTGL1's, diffuse like its bounces; KRC also evaluates
++// each lamp with its state in the previous frame (same sample): correlated paths.
 +
 +layout (constant_id = 0) const uint maxAlbedoLayerCount = 0;
 +#define MATERIAL_MAX_ALBEDO_LAYERS maxAlbedoLayerCount
@@ -1796,13 +1794,13 @@ index 0000000..73c6d17
 +#if CACHE_PASS == 0
 +#define SHARC_UPDATE 1
 +#endif
-+#define SHARC_SEPARATE_EMISSIVE 1 // l'émission des surfaces (lampes de Doom) est ajoutée au point touché
++#define SHARC_SEPARATE_EMISSIVE 1 // surface emission (Doom's lamps) is added at the hit point
 +#include "RadianceCache.h"
 +
 +#define RC_FIRST_BOUNCE_MIP_BIAS 0
 +#define RC_SECOND_BOUNCE_MIP_BIAS 32
 +
-+// ---------------------------------------------------------------- aléa
++// ---------------------------------------------------------------- random
 +uint rc_state;
 +
 +uint rc_hash(uint x)
@@ -1820,7 +1818,7 @@ index 0000000..73c6d17
 +    return float((w >> 22u) ^ w) * (1.0 / 4294967296.0);
 +}
 +
-+// graine du bruit bleu de RTGL1 tirée au hasard (chaque sommet a ses propres nombres)
++// seed of RTGL1's blue noise drawn at random (each vertex has its own numbers)
 +uint rc_seed()
 +{
 +    uint h = rc_hash(rc_state ^ 0x9e3779b9u);
@@ -1843,7 +1841,7 @@ index 0000000..73c6d17
 +    uint sector;
 +};
 +
-+// surface primaire du pixel (G-buffer) ; false pour le ciel
++// primary surface of the pixel (G-buffer); false for the sky
 +bool rc_primary_surface(ivec2 pix, out RcSurface s, out vec3 toViewer)
 +{
 +    const vec4 albedo4 = texelFetchAlbedo(pix);
@@ -1857,7 +1855,7 @@ index 0000000..73c6d17
 +    s.normal = texelFetchNormal(pix);
 +    s.normalGeom = texelFetchNormalGeometry(pix);
 +    s.albedo = albedo4.rgb;
-+    s.emission = 0.0; // l'émission vue par la caméra est déjà dans l'image
++    s.emission = 0.0; // the emission seen by the camera is already in the image
 +    s.metallic = mr.r;
 +    s.roughness = mr.g;
 +    s.instCustomIndex = floatBitsToUint(surfPosition.a);
@@ -1866,8 +1864,8 @@ index 0000000..73c6d17
 +    return true;
 +}
 +
-+// rayon diffus depuis s (même tirage que les rebonds de RTGL1, autour de la normale géométrique) ;
-+// oneOverPdf : pour le poids du premier rebond, que RTGL1 prend égal à oneOverPdf / pi
++// diffuse ray from s (same sampling as RTGL1's bounces, around the geometric normal);
++// oneOverPdf: for the weight of the first bounce, which RTGL1 takes as oneOverPdf / pi
 +ShPayload rc_bounce(RcSurface s, out vec3 dir, out float oneOverPdf)
 +{
 +    const vec2 u = vec2(rc_rand(), rc_rand());
@@ -1875,7 +1873,7 @@ index 0000000..73c6d17
 +    return traceIndirectRay(s.instCustomIndex, s.position + s.normalGeom * 0.01, dir);
 +}
 +
-+// surface touchée ; false si rien (ciel)
++// surface hit; false if nothing (sky)
 +bool rc_hit_surface(ShPayload p, RcSurface from, int bounce, out RcSurface s, out float hitDistance)
 +{
 +    hitDistance = 0;
@@ -1896,7 +1894,7 @@ index 0000000..73c6d17
 +    return true;
 +}
 +
-+// lumière diffuse sortante d'un sommet (lumière directe de RTGL1 × albédo), sans son émission
++// outgoing diffuse light of a vertex (RTGL1 direct light × albedo), without its emission
 +vec3 rc_vertex_light(RcSurface s, vec3 toViewer, int bounce)
 +{
 +    vec3 diffuse, specular;
@@ -1906,17 +1904,17 @@ index 0000000..73c6d17
 +    return s.albedo * diffuse;
 +}
 +
-+// ---------------------------------------------------------------- KRC : lumière directe avant / après
-+// Mêmes tirages que RTGL1 (processSphericalLight, processPolygonalLight…), mais chaque lampe tirée
-+// est évaluée deux fois : avec son état de la frame et avec celui de la frame précédente (trouvé
-+// par son identifiant). Même point, même rayon d'ombre : la différence est presque sans bruit.
-+// lightId / lightLum : le groupe de la lampe la plus forte du tirage (rééclairage exact par groupe).
++// ---------------------------------------------------------------- KRC: direct light before / after
++// Same sampling as RTGL1 (processSphericalLight, processPolygonalLight…), but each sampled lamp
++// is evaluated twice: with its state in the frame and with its state in the previous frame (found
++// by its identifier). Same point, same shadow ray: the difference is almost noise-free.
++// lightId / lightLum: the group of the strongest lamp of the sample (exact relighting per group).
 +struct KrcDirect
 +{
 +    vec3 dnew;
 +    vec3 dold;
-+    uint lightId;   // groupe de lampes + 1, 0 : aucun
-+    float lightLum; // luminance (nouvelle) apportée par cette lampe
++    uint lightId;   // lamp group + 1, 0: none
++    float lightLum; // luminance (new) brought by this lamp
 +};
 +
 +void krc_keep_light(inout KrcDirect r, uint id, vec3 c)
@@ -1986,7 +1984,7 @@ index 0000000..73c6d17
 +    const float irr = krc_sph_irradiance(L, s, dirToCenter);
 +    const vec3 cnew = evalBRDFLambertian(1.0) * L.color * M_PI * irr / pdf;
 +
-+    vec3 cold = vec3(0); // lampe nouvelle : elle n'éclairait rien avant
++    vec3 cold = vec3(0); // new lamp: it lit nothing before
 +    const uint packed = rc_cur_to_prev_sph().v[idx];
 +    const uint prev = packed & 0xffffu;
 +    if (prev != 0xffffu)
@@ -2025,7 +2023,7 @@ index 0000000..73c6d17
 +    const float ll = -dot(triNormal, l);
 +    if (nl <= 0 || ngl <= 0 || ll <= 0)
 +        return 0;
-+    // aire du triangle : la densité de tirage du point est 1 / aire
++    // triangle area: the sampling density of the point is 1 / area
 +    return triArea * min(pow(ll, globalUniform.polyLightSpotlightFactor) * getGeometryFactor(triNormal, l, distToLightPoint),
 +                         globalUniform.firefliesClamp);
 +}
@@ -2103,8 +2101,8 @@ index 0000000..73c6d17
 +    krc_keep_light(r, packed >> 16, cnew * vis);
 +}
 +
-+// lumière directe diffuse d'un sommet, avant et après. Soleil et lampe torche : RTGL1 ne garde pas
-+// leur état précédent, ils comptent pareil avant et après (un changement passe par la détection).
++// diffuse direct light of a vertex, before and after. Sun and flashlight: RTGL1 does not keep
++// their previous state, they count the same before and after (a change goes through detection).
 +KrcDirect krc_direct(RcSurface s, vec3 toViewer, int bounce)
 +{
 +    KrcDirect r;
@@ -2172,7 +2170,7 @@ index 0000000..73c6d17
 +        vec3 dir;
 +        float oneOverPdf;
 +        const ShPayload p = rc_bounce(s, dir, oneOverPdf);
-+        // rebond lambertien tiré selon le cosinus : poids = albédo
++        // Lambertian bounce sampled by cosine: weight = albedo
 +        SharcSetThroughput(state, s.albedo);
 +        RcSurface h;
 +        float hitDistance;
@@ -2283,8 +2281,8 @@ index 0000000..73c6d17
 +    return max(cell.sigma, 1e-4);
 +}
 +
-+vec3 krc_first_dir;   // direction du premier rebond du dernier chemin
-+uint krc_path_light;  // lampe principale du chemin (rééclairage exact)
++vec3 krc_first_dir;   // direction of the first bounce of the last path
++uint krc_path_light;  // main lamp of the path (exact relighting)
 +float krc_path_light_lum;
 +
 +void krc_track_light(KrcDirect d, vec3 beta, vec3 albedo)
@@ -2297,10 +2295,10 @@ index 0000000..73c6d17
 +    }
 +}
 +
-+// Un chemin d'indirect depuis la surface primaire du pixel : premier rebond tiré comme RTGL1,
-+// puis jusqu'à KRC_BOUNCES rebonds diffus, avec arrêt sur une cellule mûre au 1er ou 2e sommet
-+// (rééchantillonnage). value : estimation avec la lumière de la frame ; old : la même avec la
-+// lumière de la frame précédente.
++// One indirect path from the pixel's primary surface: first bounce sampled like RTGL1,
++// then up to KRC_BOUNCES diffuse bounces, stopping on a mature cell at the 1st or 2nd vertex
++// (resampling). value: estimate with the frame's light; old: the same with the
++// previous frame's light.
 +void krc_path(RcSurface s, vec3 toViewer, bool reference, out vec3 value, out vec3 old)
 +{
 +    value = vec3(0);
@@ -2312,8 +2310,8 @@ index 0000000..73c6d17
 +    float oneOverPdf;
 +    ShPayload p = rc_bounce(s, dir, oneOverPdf);
 +    krc_first_dir = dir;
-+    // poids du premier rebond : la convention de RTGL1 (getDiffuseBounce), que son encodage de
-+    // l'indirect et son débruiteur attendent ; ensuite, le poids exact d'un rebond lambertien
++    // weight of the first bounce: RTGL1's convention (getDiffuseBounce), which its encoding of
++    // the indirect and its denoiser expect; after that, the exact weight of a Lambertian bounce
 +    vec3 beta = vec3(evalBRDFLambertian(1.0) * oneOverPdf);
 +
 +    const int bounces = max(reference ? RC_REF_BOUNCES : RC_BOUNCES, 1);
@@ -2380,7 +2378,7 @@ index 0000000..73c6d17
 +    return float(int64_t(krc_acc().v[i])) / KRC_FX;
 +}
 +
-+// passe 2
++// pass 2
 +void krc_prep()
 +{
 +    KrcU64 ctr = krc_ctr();
@@ -2393,8 +2391,8 @@ index 0000000..73c6d17
 +    ctr.v[KRC_C_CLOCK] += 1;
 +}
 +
-+// passe 3 : la cellule du pixel (créée si besoin), puis ses tâches : en moyenne
-+// KRC_PPP × sigma / sigma moyen chemins (allocation de Neyman)
++// pass 3: the pixel's cell (created if needed), then its tasks: on average
++// KRC_PPP × sigma / mean sigma paths (Neyman allocation)
 +void krc_pixel(ivec2 pix)
 +{
 +    if (pix.x >= int(RC_WIDTH) || pix.y >= int(RC_HEIGHT) || !rc_fits())
@@ -2454,9 +2452,9 @@ index 0000000..73c6d17
 +    }
 +}
 +
-+// Rééclairage exact : la cellule suit ses deux lampes principales. Pendant la frame, chaque
-+// chemin dépose la part de sa lampe principale dans l'emplacement de cette lampe (pris s'il est
-+// libre) ; à la résolution, ces parts deviennent des fractions de l'indirect de la cellule.
++// Exact relighting: the cell tracks its two main lamps. During the frame, each
++// path deposits the share of its main lamp in that lamp's slot (taken if it is
++// free); at resolve time, these shares become fractions of the cell's indirect.
 +void krc_add_light(uint b, uint light, float lumInd, float lumDir)
 +{
 +    if (light == 0 || !RC_KRC_RELIGHT)
@@ -2476,7 +2474,7 @@ index 0000000..73c6d17
 +    }
 +}
 +
-+// passe 7 : un fil par tâche
++// pass 7: one thread per task
 +void krc_trace(uint id)
 +{
 +    KrcU64 ctr = krc_ctr();
@@ -2497,7 +2495,7 @@ index 0000000..73c6d17
 +    krc_path(s, toViewer, false, v, o);
 +    v = clamp(v, vec3(0), vec3(1e4));
 +    o = clamp(o, vec3(0), vec3(1e4));
-+    // écrêtage des lucioles : un échantillon plus de 50× la moyenne d'une cellule mûre
++    // firefly clamping: a sample more than 50× the mean of a mature cell
 +    float l = rc_lum(v);
 +    float clampK = 1.0;
 +    if (cell.n >= 8.0 && l > 50.0 * max(cell.lmean, 1e-4))
@@ -2524,8 +2522,8 @@ index 0000000..73c6d17
 +    const uint pathLight = krc_path_light;
 +    const float pathLightLum = krc_path_light_lum * clampK;
 +
-+    // lumière directe au point de départ, avant et après : rapport pour le débruiteur, et part
-+    // de la lampe principale
++    // direct light at the start point, before and after: ratio for the denoiser, and share
++    // of the main lamp
 +    float d0Lum = 0;
 +    uint d0Light = 0;
 +    if (RC_KRC_DN_TALK)
@@ -2541,7 +2539,7 @@ index 0000000..73c6d17
 +        krc_add_light(b, d0Light, 0.0, d0Lum);
 +}
 +
-+// passe 4
++// pass 4
 +void krc_mid()
 +{
 +    KrcU64 ctr = krc_ctr();
@@ -2550,7 +2548,7 @@ index 0000000..73c6d17
 +    ctr.v[KRC_C_POP] = 0;
 +}
 +
-+// passe 5 : éviction des cellules inutilisées depuis 120 frames (1/32 des cellules par frame)
++// pass 5: eviction of cells unused for 120 frames (1/32 of the cells per frame)
 +void krc_evict(uint id)
 +{
 +    KrcU64 ctr = krc_ctr();
@@ -2575,9 +2573,9 @@ index 0000000..73c6d17
 +    krc_free().v[uint(atomicAdd(ctr.v[KRC_C_FREE], uint64_t(1)))] = c;
 +}
 +
-+// Rapport « après / avant » d'un groupe de lampes suivi, donné par le moteur (exact) ; false si
-+// le moteur ne le connaît pas sûrement dans cette frame (lampes qui changent différemment, lampe
-+// nouvelle) : ce changement-là passe alors par les chemins corrélés.
++// "After / before" ratio of a tracked lamp group, given by the engine (exact); false if
++// the engine does not know it reliably in this frame (lamps changing differently, lamp
++// new): that change then goes through the correlated paths.
 +bool krc_light_ratio(uint id, out float ratio)
 +{
 +    ratio = 1.0;
@@ -2592,10 +2590,10 @@ index 0000000..73c6d17
 +    return true;
 +}
 +
-+// Passe 6 : résolution des cellules utilisées. 1) rééclairage exact : les lampes suivies dont
-+// l'intensité a changé (connue du moteur, sans bruit) mettent à l'échelle leur part de
-+// l'historique ; 2) chemins corrélés : la différence « après - avant » mesurée par les chemins,
-+// moins ce que le rééclairage a déjà expliqué ; 3) moyenne glissante, détection de changement.
++// Pass 6: resolve of the used cells. 1) exact relighting: the tracked lamps whose
++// intensity changed (known by the engine, noise-free) scale their share of the
++// history; 2) correlated paths: the "after - before" difference measured by the paths,
++// minus what relighting already explained; 3) running mean, change detection.
 +void krc_resolve(uint id)
 +{
 +    KrcU64 ctr = krc_ctr();
@@ -2608,11 +2606,11 @@ index 0000000..73c6d17
 +    const uint b = c * KRC_ACC;
 +    const float fn = float(acc.v[b + KRC_A_FN]);
 +
-+    // 1) rééclairage exact par lampe
-+    vec3 explained = vec3(0);   // changement déjà expliqué (pour ne pas le compter deux fois)
++    // 1) exact relighting per lamp
++    vec3 explained = vec3(0);   // change already explained (so as not to count it twice)
 +    float relightD0 = 1.0;
 +    float scaleInd = 1.0;
-+    float coveredD0 = 0.0;      // part de la lumière directe portée par les groupes suivis
++    float coveredD0 = 0.0;      // share of the direct light carried by the tracked groups
 +    float relightIndOut = 1.0;
 +    const float lumBefore = rc_lum(cell.mean);
 +    if (RC_KRC_RELIGHT && cell.n > 0.0)
@@ -2648,16 +2646,16 @@ index 0000000..73c6d17
 +        const float rel = abs(rc_lum(fd)) / max(cell.lmean, 1e-4);
 +        float change = (cell.n > 0.0) ? smoothstep(0.03, 0.2, rel) : 1.0;
 +
-+        // 2) chemins corrélés, sans ce que le rééclairage exact a déjà appliqué
++        // 2) correlated paths, without what exact relighting already applied
 +        if (cell.n > 0.0 && RC_KRC_DELTA)
 +        {
 +            fd -= explained;
 +            cell.mean = max(cell.mean + fd, vec3(0));
 +            cell.lmean = max(cell.lmean + rc_lum(fd), 0.0);
 +        }
-+        // rapport de l'indirect pour l'historique du débruiteur : rééclairage exact et chemins
-+        // corrélés (nuls quand rien ne change : aucun bruit dans une scène fixe), sans la moyenne
-+        // glissante, qui est bruitée et ferait dériver l'historique jusqu'au blanc
++        // ratio of the indirect for the denoiser's history: exact relighting and correlated
++        // paths (zero when nothing changes: no noise in a static scene), without the running
++        // mean, which is noisy and would make the history drift up to white
 +        relightIndOut = (lumBefore > 1e-6) ? clamp(rc_lum(cell.mean) / lumBefore, 0.0, 50.0) : 1.0;
 +        if (RC_KRC_DETECT && cell.n >= 8.0 && fn >= 4.0)
 +        {
@@ -2686,12 +2684,12 @@ index 0000000..73c6d17
 +        }
 +        const float d0n = krc_load(b + KRC_A_D0NEW);
 +        const float d0o = krc_load(b + KRC_A_D0OLD);
-+        // rapport pour le débruiteur : exact pour la part des groupes suivis, mesuré pour le reste
-+        // (même échantillon et même ombre avant et après : vaut 1 exactement si rien ne change)
++        // ratio for the denoiser: exact for the share of the tracked groups, measured for the rest
++        // (same sample and same shadow before and after: exactly 1 if nothing changes)
 +        const float measured = (d0o > 1e-5) ? clamp(d0n / d0o, 0.0, 50.0) : 1.0;
 +        cell.relight = RC_KRC_RELIGHT ? relightD0 + (1.0 - coveredD0) * (measured - 1.0) : measured;
 +
-+        // parts des lampes suivies (moyenne glissante des fractions mesurées dans la frame)
++        // shares of the tracked lamps (running mean of the fractions measured in the frame)
 +        if (RC_KRC_RELIGHT)
 +        {
 +            const float sumInd = max(krc_load(b + KRC_A_LUM), 1e-6);
@@ -2703,7 +2701,7 @@ index 0000000..73c6d17
 +                    continue;
 +                const float fi = clamp(krc_load(b + KRC_A_LIND + k) / sumInd, 0.0, 1.0);
 +                const float fdl = clamp(krc_load(b + KRC_A_LDIR + k) / sumDir, 0.0, 1.0);
-+                // même lampe : on lisse ; sinon la lampe la plus forte prend la place
++                // same lamp: smooth; otherwise the strongest lamp takes the slot
 +                uint slotK = (cell.lights[0] == lid) ? 0u : ((cell.lights[1] == lid) ? 1u : 2u);
 +                if (slotK == 2u)
 +                {
@@ -2720,7 +2718,7 @@ index 0000000..73c6d17
 +                    cell.dshare[slotK] = mix(cell.dshare[slotK], fdl, a);
 +                }
 +            }
-+            // les parts ne dépassent pas le tout
++            // the shares do not exceed the whole
 +            const float si = cell.share.x + cell.share.y;
 +            if (si > 1.0) cell.share /= si;
 +            const float sd = cell.dshare.x + cell.dshare.y;
@@ -2741,7 +2739,7 @@ index 0000000..73c6d17
 +        acc.v[b + i] = 0;
 +}
 +
-+// ---------------------------------------------------------------- référence (mode 3)
++// ---------------------------------------------------------------- reference (mode 3)
 +void ref_pixel(ivec2 pix)
 +{
 +    if (pix.x >= int(RC_WIDTH) || pix.y >= int(RC_HEIGHT) || !rc_fits())
@@ -2800,7 +2798,7 @@ index 0000000..b34bc5a
 +++ b/Source/Shaders/RtCache0.rgen
 @@ -0,0 +1,7 @@
 +// Copyright (c) 2026 Skynizz
-+// Passe 0 des caches de radiance (voir RtCache.inl).
++// Pass 0 of the radiance caches (see RtCache.inl).
 +
 +#version 460
 +#include "RadianceCacheExt.h"
@@ -2813,7 +2811,7 @@ index 0000000..6c72215
 +++ b/Source/Shaders/RtCache1.rgen
 @@ -0,0 +1,7 @@
 +// Copyright (c) 2026 Skynizz
-+// Passe 1 des caches de radiance (voir RtCache.inl).
++// Pass 1 of the radiance caches (see RtCache.inl).
 +
 +#version 460
 +#include "RadianceCacheExt.h"
@@ -2826,7 +2824,7 @@ index 0000000..23e8fe6
 +++ b/Source/Shaders/RtCache2.rgen
 @@ -0,0 +1,7 @@
 +// Copyright (c) 2026 Skynizz
-+// Passe 2 des caches de radiance (voir RtCache.inl).
++// Pass 2 of the radiance caches (see RtCache.inl).
 +
 +#version 460
 +#include "RadianceCacheExt.h"
@@ -2839,7 +2837,7 @@ index 0000000..28d56ac
 +++ b/Source/Shaders/RtCache3.rgen
 @@ -0,0 +1,7 @@
 +// Copyright (c) 2026 Skynizz
-+// Passe 3 des caches de radiance (voir RtCache.inl).
++// Pass 3 of the radiance caches (see RtCache.inl).
 +
 +#version 460
 +#include "RadianceCacheExt.h"
@@ -2852,7 +2850,7 @@ index 0000000..a8cdbe1
 +++ b/Source/Shaders/RtCache4.rgen
 @@ -0,0 +1,7 @@
 +// Copyright (c) 2026 Skynizz
-+// Passe 4 des caches de radiance (voir RtCache.inl).
++// Pass 4 of the radiance caches (see RtCache.inl).
 +
 +#version 460
 +#include "RadianceCacheExt.h"
@@ -2865,7 +2863,7 @@ index 0000000..99e9c10
 +++ b/Source/Shaders/RtCache5.rgen
 @@ -0,0 +1,7 @@
 +// Copyright (c) 2026 Skynizz
-+// Passe 5 des caches de radiance (voir RtCache.inl).
++// Pass 5 of the radiance caches (see RtCache.inl).
 +
 +#version 460
 +#include "RadianceCacheExt.h"
@@ -2878,7 +2876,7 @@ index 0000000..f87aa21
 +++ b/Source/Shaders/RtCache6.rgen
 @@ -0,0 +1,7 @@
 +// Copyright (c) 2026 Skynizz
-+// Passe 6 des caches de radiance (voir RtCache.inl).
++// Pass 6 of the radiance caches (see RtCache.inl).
 +
 +#version 460
 +#include "RadianceCacheExt.h"
@@ -2891,7 +2889,7 @@ index 0000000..a978def
 +++ b/Source/Shaders/RtCache7.rgen
 @@ -0,0 +1,7 @@
 +// Copyright (c) 2026 Skynizz
-+// Passe 7 des caches de radiance (voir RtCache.inl).
++// Pass 7 of the radiance caches (see RtCache.inl).
 +
 +#version 460
 +#include "RadianceCacheExt.h"
@@ -2932,13 +2930,13 @@ index 7c2479a..d9759a8 100644
  #define RAYGEN_ALLOW_FIREFLIES_CLAMP
  #include "RaygenCommon.h"
  
-+// caches de radiance (branche krc) : lecture de SHaRC au premier rebond, indirect de KRC
++// radiance caches (krc branch): SHaRC read at the first bounce, KRC indirect
 +#define SHARC_QUERY 1
 +#define SHARC_SEPARATE_EMISSIVE 1
 +#include "RadianceCache.h"
-+bool rcSpecularBounce = false; // le rebond en cours est le reflet spéculaire
-+vec3 rcSpecOld = vec3(-1.0);   // KRC : le reflet avec l'éclairage de la frame précédente (-1 : inconnu)
-+vec3 rcSpecNew = vec3(0), rcSpecOldTotal = vec3(0), rcSpecDirect = vec3(0); // spéculaire du pixel
++bool rcSpecularBounce = false; // the current bounce is the specular reflection
++vec3 rcSpecOld = vec3(-1.0);   // KRC: the reflection with the previous frame's lighting (-1: unknown)
++vec3 rcSpecNew = vec3(0), rcSpecOldTotal = vec3(0), rcSpecDirect = vec3(0); // specular of the pixel
 +
  float getModifiedIndirRoughness(float r)
  {
@@ -3004,9 +3002,9 @@ index 7c2479a..d9759a8 100644
          float hitDistance;
          const ShHitInfo h = getHitInfoBounce(p, surfPosition, surfRoughness, FIRST_BOUNCE_MIP_BIAS, hitDistance);
  
-+        // SHaRC : si le segment dépasse le voxel (et, pour un reflet, si le cône du lobe le
-+        // couvre), la radiance du cache remplace l'éclairage du point et le second rebond (règles
-+        // du guide d'intégration du SDK) ; l'émission du point est ajoutée comme RTGL1 le fait
++        // SHaRC: if the segment is longer than the voxel (and, for a reflection, if the lobe cone
++        // covers it), the cache radiance replaces the point's lighting and the second bounce (rules
++        // of the SDK integration guide); the point's emission is added as RTGL1 does
 +        if (cache_mode() == CACHE_SHARC)
 +        {
 +            SharcParameters sharcParams = sharc_parameters();
@@ -3046,9 +3044,9 @@ index 7c2479a..d9759a8 100644
          throughput_First *= h.albedo;
          rayHitDistance = length(h.hitPosition - surfPosition);
  
-+        // KRC : au point touché, le second rebond est lu dans les cellules (tous les rebonds, sans
-+        // rayon) ; pour le débruiteur, le même reflet avec l'éclairage d'avant (l'émission ne
-+        // change pas, la lumière des lampes suit les rapports des cellules)
++        // KRC: at the hit point, the second bounce is read from the cells (every bounce, no
++        // ray); for the denoiser, the same reflection with the previous lighting (emission does not
++        // change, the lamps' light follows the cells' ratios)
 +        if (cache_mode() == CACHE_KRC && rc_fits())
 +        {
 +            vec3 cellValue, cellDir;
@@ -3110,9 +3108,9 @@ index 7c2479a..d9759a8 100644
  {
 +    rcSpecularBounce = false;
 +
-+    // KRC : indirect lu dans les cellules voisines (même grandeur que le rebond diffus de RTGL1,
-+    // avec tous les rebonds), sans rayon ; direction moyenne mesurée par les cellules. Tant que
-+    // les cellules n'ont pas d'échantillon, RTGL1 trace son rebond comme avant.
++    // KRC: indirect read from the neighbouring cells (same quantity as RTGL1's diffuse bounce,
++    // with every bounce), no ray; mean direction measured by the cells. As long as
++    // the cells have no sample, RTGL1 traces its bounce as before.
 +    if (cache_mode() == CACHE_KRC && rc_fits())
 +    {
 +        vec3 cellValue, cellDir;
@@ -3120,15 +3118,15 @@ index 7c2479a..d9759a8 100644
 +        if (krc_smooth_indirect(surfPosition, surfNormalGeom, cellValue, cellSignal, cellDir))
 +        {
 +            krc_signal().v[rc_pixel_index(ivec2(gl_LaunchIDEXT.xy))] = cellSignal;
-+            // débogage : rouge = NaN ou infini, vert = luminance > 1, bleu = luminance > 10
++            // debugging: red = NaN or infinite, green = luminance > 1, blue = luminance > 10
 +            if (RC_DEBUG == 7)
 +            {
 +                const float l = rc_lum(cellValue);
 +                const bool bad = any(isnan(cellValue)) || any(isinf(cellValue));
 +                return irradianceToSH(vec3(bad ? 100.0 : 0.0, (!bad && l > 1.0) ? 100.0 : 0.0, (!bad && l > 10.0) ? 100.0 : 0.0), surfNormalGeom * (2.0 / 3.0));
 +            }
-+            // débogage : rapports pour le débruiteur, rouge = direct > 1,05, bleu = direct < 0,95,
-+            // vert = indirect hors de [0,95 ; 1,05]
++            // debugging: ratios for the denoiser, red = direct > 1.05, blue = direct < 0.95,
++            // green = indirect outside [0.95, 1.05]
 +            if (RC_DEBUG == 8)
 +            {
 +                return irradianceToSH(vec3(cellSignal.x > 1.05 ? 100.0 : 0.0, abs(cellSignal.z - 1.0) > 0.05 ? 100.0 : 0.0, cellSignal.x < 0.95 ? 100.0 : 0.0), surfNormalGeom * (2.0 / 3.0));
@@ -3137,7 +3135,7 @@ index 7c2479a..d9759a8 100644
 +        }
 +        krc_signal().v[rc_pixel_index(ivec2(gl_LaunchIDEXT.xy))] = vec4(1.0, 0.0, 1.0, 0.0);
 +    }
-+    // référence : le chemin complet du pixel (à accumuler)
++    // reference: the pixel's full path (to be accumulated)
 +    if (cache_mode() == CACHE_REF && rc_fits())
 +    {
 +        const uint i = rc_pixel_index(ivec2(gl_LaunchIDEXT.xy));
@@ -3204,8 +3202,8 @@ index 7c2479a..d9759a8 100644
          imageStoreUnfilteredIndirectSH(pix, bounceSH);
      }
 +
-+    // KRC : rapport du spéculaire pour le débruiteur (direct : rapport de la cellule du pixel ;
-+    // reflet : calculé au point touché) ; 1 exactement quand rien ne change
++    // KRC: specular ratio for the denoiser (direct: ratio of the pixel's cell;
++    // reflection: computed at the hit point); exactly 1 when nothing changes
 +    if (cache_mode() == CACHE_KRC && rc_fits())
 +    {
 +        const uint i = rc_pixel_index(pix);
@@ -5221,7 +5219,7 @@ index c2101c6..aca7b54 100644
 @@ -941,6 +956,7 @@ void VulkanDevice::Render(VkCommandBuffer cmd, const RgDrawFrameInfo &drawInfo)
      }
  
-     // capture de mesure : image finale, avant l'interface du jeu
+     // measurement capture: final image, before the game's UI
 +    krcTimer.Write(cmd, frameIndex, KrcGpuTimer::FRAME_END);
      krcCapture.Record(cmd, framebuffers->GetImage(currentResultImage, frameIndex),
                        renderResolution.UpscaledWidth(), renderResolution.UpscaledHeight(), frameId);
@@ -5230,7 +5228,7 @@ index c2101c6..aca7b54 100644
          throw RgException(RG_FRAME_WASNT_ENDED);
      }
  
-+    // scénario de mesure (avant l'envoi des lampes de la frame)
++    // measurement script (before the frame's lamps are sent)
 +    KrcScript::Get().Frame(frameId);
 +
      if (startInfo == nullptr)
@@ -5240,7 +5238,7 @@ index c2101c6..aca7b54 100644
      vulkan12Features.shaderSampledImageArrayNonUniformIndexing = 1;
      vulkan12Features.shaderStorageBufferArrayNonUniformIndexing = 1;
      vulkan12Features.bufferDeviceAddress = 1;
-+    vulkan12Features.shaderBufferInt64Atomics = 1; // SHaRC (clés 64 bits) et KRC (accumulateurs)
++    vulkan12Features.shaderBufferInt64Atomics = 1; // SHaRC (64-bit keys) and KRC (accumulators)
      vulkan12Features.shaderFloat16 = 1;
      vulkan12Features.drawIndirectCount = 1;
  
@@ -5259,8 +5257,8 @@ index 9a81d0d..838d609 100644
 @@ -243,6 +244,7 @@ private:
      // incremented every frame
      uint32_t            frameId;
-     KrcCapture          krcCapture;     // captures de mesure (KRC_CAPTURE)
-+    KrcGpuTimer         krcTimer;       // temps GPU des étapes (mesure fps=N de KRC_SCRIPT)
+     KrcCapture          krcCapture;     // measurement captures (KRC_CAPTURE)
++    KrcGpuTimer         krcTimer;       // GPU time of the stages (fps=N measurement of KRC_SCRIPT)
  
      VkFence             frameFences[MAX_FRAMES_IN_FLIGHT] = {};
      VkSemaphore         imageAvailableSemaphores[MAX_FRAMES_IN_FLIGHT] = {};
@@ -5268,7 +5266,7 @@ index 9a81d0d..838d609 100644
      std::shared_ptr<ShaderManager>          shaderManager;
      std::shared_ptr<RayTracingPipeline>     rtPipeline;
      std::shared_ptr<PathTracer>             pathTracer;
-+    std::shared_ptr<RadianceCache>          radianceCache;  // caches de l'indirect (KRC_MODE)
++    std::shared_ptr<RadianceCache>          radianceCache;  // caches of the indirect (KRC_MODE)
      std::shared_ptr<Rasterizer>             rasterizer;
      std::shared_ptr<DecalManager>           decalManager;
      std::shared_ptr<Denoiser>               denoiser;

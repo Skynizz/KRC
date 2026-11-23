@@ -1,9 +1,7 @@
 From d028d8595fee3415043a4c6e28e5c4b697bec4ef Mon Sep 17 00:00:00 2001
 From: Skynizz <182822215+Skynizz@users.noreply.github.com>
 Date: Sun, 25 Oct 2026 00:00:24 +0200
-Subject: [PATCH 3/6] =?UTF-8?q?KRC-A=20:=20poids=20de=20la=20m=C3=A8re=20d?=
- =?UTF-8?q?=C3=A9cid=C3=A9=20=C3=A0=20la=20r=C3=A9solution=20et=20liss?=
- =?UTF-8?q?=C3=A9=20;=20jamais=20la=20m=C3=A8re=20sans=20cellule=20fine?=
+Subject: [PATCH 3/6] KRC-A: parent weight decided at resolve time and smoothed; never the parent without a fine cell
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
@@ -18,16 +16,16 @@ index 310f3b9..8851dd8 100644
 --- a/Samples/Pathtracer/Shaders/KrcAdaptive.hlsli
 +++ b/Samples/Pathtracer/Shaders/KrcAdaptive.hlsli
 @@ -12,7 +12,12 @@
-  * l'échelle de la mère (bord, ombre), on lit la fine, sans fuite.
+  * the parent's scale (edge, shadow), the fine one is read, with no leak.
   *
-  * Requiert SharcCommon.h et u_KrcMoments (float4 par entrée : moyenne glissante de la luminance
-- * moyenne de la frame, de son carré, nombre de frames comptées).
-+ * moyenne de la frame, de son carré, nombre de frames comptées ; pour une cellule fine, part de la
-+ * mère dans sa lecture, calculée à la résolution et lissée dans le temps).
+  * Requires SharcCommon.h and u_KrcMoments (float4 per entry: running mean of the frame's mean
+- * luminance, of its square, number of counted frames).
++ * mean luminance, of its square, number of counted frames; for a fine cell, the parent's share
++ * in its read, computed at resolve time and smoothed over time).
 + *
-+ * Le poids se décide à la résolution, une fois par frame et par cellule, puis se lisse : recalculé à
-+ * chaque lecture, il suivait le bruit de la variance estimée et faisait scintiller l'image, ce qui
-+ * gênait le débruiteur.
++ * The weight is decided at resolve time, once per frame and per cell, then smoothed: recomputed at
++ * every read, it followed the noise of the estimated variance and made the image flicker, which
++ * hindered the denoiser.
   */
  
  #ifndef KRC_ADAPTIVE_HLSLI
@@ -62,7 +60,7 @@ index 310f3b9..8851dd8 100644
 +    return s;
 +}
 +
-+// à la résolution, pour une cellule fine : part de la mère (rétrécissement), lissée dans le temps
++// at resolve time, for a fine cell: share of the parent (shrinkage), smoothed over time
 +void KrcResolveWeight(uint entryIndex, SharcParameters sharcParameters, float tolerance, RWStructuredBuffer<float4> moments)
 +{
 +    if (entryIndex >= sharcParameters.hashGridData.capacity)
@@ -83,7 +81,7 @@ index 310f3b9..8851dd8 100644
 +        const float d2 = max(d * d - tol * tol, 0.0f);
 +        target = fineVar / max(fineVar + d2 + mother.varMean, 1e-12f);
 +    }
-+    // nouvelle cellule : part de la mère d'emblée (pas encore de preuve d'une différence)
++    // new cell: the parent's share at once (no evidence of a difference yet)
 +    m.w = (m.z <= 1.0f) ? 1.0f : lerp(m.w, target, 0.1f);
 +    moments[entryIndex] = m;
 +}
@@ -91,10 +89,10 @@ index 310f3b9..8851dd8 100644
  struct KrcCellRead
  {
      bool found;
-     float3 radiance;   // démodulée
+     float3 radiance;   // demodulated
      float lum;
-     float varMean;     // variance de la valeur lue (moyenne sur les frames accumulées)
-+    float weight;      // cellule fine : part de la mère, décidée à la résolution
+     float varMean;     // variance of the value read (mean over the accumulated frames)
++    float weight;      // fine cell: share of the parent, decided at resolve time
  };
  
  KrcCellRead KrcReadCell(SharcParameters sharcParameters, HashGridKey key, RWStructuredBuffer<float4> moments)
@@ -119,8 +117,8 @@ index 310f3b9..8851dd8 100644
      const KrcCellRead fine = KrcReadCell(sharcParameters, fineKey, moments);
      const KrcCellRead mother = KrcReadCell(sharcParameters, KrcMotherKey(fineKey), moments);
 -    if (!fine.found && !mother.found)
-+    // sans cellule fine, rien : comme SHaRC, le chemin continue. Lire la mère à sa place la faisait
-+    // déborder là où aucune cellule fine n'existe (pied des meubles), en points clairs
++    // without a fine cell, nothing: like SHaRC, the path continues. Reading the parent instead made it
++    // spill where no fine cell exists (feet of furniture), as bright dots
 +    if (!fine.found)
          return false;
  

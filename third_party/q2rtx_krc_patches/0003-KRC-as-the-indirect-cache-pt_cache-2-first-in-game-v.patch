@@ -1,24 +1,23 @@
 From 61bee8c9ad00e1fa546350ddb872662e13776599 Mon Sep 17 00:00:00 2001
 From: Skynizz <182822215+Skynizz@users.noreply.github.com>
 Date: Thu, 22 Oct 2026 23:48:21 +0200
-Subject: [PATCH 3/6] =?UTF-8?q?KRC=20comme=20cache=20de=20l'indirect=20(pt?=
- =?UTF-8?q?=5Fcache=202),=20premi=C3=A8re=20version=20dans=20le=20jeu?=
+Subject: [PATCH 3/6] KRC as the indirect cache (pt_cache 2), first in-game version
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
 
-- Cellules en espace monde (≈ pt_krc_cell_px pixels, niveaux en puissances
-  de 2, par face), K = 4 cellules décalées par pixel, moyenne tronquée.
-- Allocation de Neyman par pixel (pt_krc_ppp × sigma / sigma moyen), sans
-  liste de tâches ; chemins depuis la surface primaire avec l'éclairage du
-  jeu, rééchantillonnage sur les cellules mûres.
-- Chemins corrélés : chaque échantillon évalue la lumière directe avec
-  l'intensité des lampes animées de la frame et de la précédente
-  (prev_style_scale du jeu), la différence corrige l'historique.
-- Détection des changements non expliqués (portes, objets).
-- Lecture : l'indirect diffus du pixel vient des cellules, sans rayon ;
-  le reflet spéculaire reste celui du jeu.
-- Compilateur en anglais (VSLANG) : Ninja suit enfin les en-têtes.
+- World-space cells (≈ pt_krc_cell_px pixels, power-of-2 levels,
+  per face), K = 4 offset cells per pixel, truncated mean.
+- Neyman allocation per pixel (pt_krc_ppp × sigma / mean sigma), without a
+  task list; paths from the primary surface with the game's lighting,
+  resampling on mature cells.
+- Correlated paths: each sample evaluates the direct light with the
+  intensity of the animated lamps in the frame and in the previous one
+  (the game's prev_style_scale); the difference corrects the history.
+- Detection of unexplained changes (doors, objects).
+- Reading: the pixel's diffuse indirect comes from the cells, with no ray;
+  the specular reflection stays the game's.
+- English compiler (VSLANG): Ninja finally follows the headers.
 
 ---
  build_krc.bat                                 |   4 +-
@@ -37,9 +36,9 @@ index 12e75839..bba2d390 100644
 +++ b/build_krc.bat
 @@ -1,5 +1,7 @@
  @echo off
--rem Compilation de Quake II RTX (branche KRC) : environnement MSVC x64, CMake + Ninja de Visual Studio.
-+rem Compilation de Quake II RTX (branche krc) : MSVC x64, CMake + Ninja de Visual Studio.
-+rem Compilateur en anglais : Ninja ne lit les dependances aux en-tetes que dans ce format.
+-rem Build of Quake II RTX (KRC branch): MSVC x64 environment, CMake + Ninja from Visual Studio.
++rem Build of Quake II RTX (krc branch): MSVC x64, CMake + Ninja from Visual Studio.
++rem English compiler: Ninja only reads header dependencies in that format.
 +set VSLANG=1033
  call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat" >nul || exit /b 1
  cd /d %~dp0
@@ -52,9 +51,9 @@ index 15c63a3f..f710f0e5 100644
      PIPELINE_DIRECT_LIGHTING_CAUSTICS,
      PIPELINE_INDIRECT_LIGHTING_FIRST,
      PIPELINE_INDIRECT_LIGHTING_SECOND,
--	PIPELINE_CACHE_UPDATE,      // cache de radiance : chemins de mise à jour
--	PIPELINE_CACHE_RESOLVE,     // cache de radiance : résolution
-+	PIPELINE_CACHE_FIRST,       // caches de radiance : une passe par valeur de spec_pass
+-	PIPELINE_CACHE_UPDATE,      // radiance cache: update paths
+-	PIPELINE_CACHE_RESOLVE,     // radiance cache: resolve
++	PIPELINE_CACHE_FIRST,       // radiance caches: one pass per spec_pass value
 +	PIPELINE_CACHE_LAST = PIPELINE_CACHE_FIRST + 6,
  
  	PIPELINE_COUNT
@@ -82,7 +81,7 @@ index 15c63a3f..f710f0e5 100644
 -	cache_barrier(cmd_buf);
 +	if (mode == 1)
 +	{
-+		// SHaRC : Update (un pixel par bloc NxN), Resolve (toutes les entrées)
++		// SHaRC: Update (one pixel per NxN block), Resolve (every entry)
 +		uint32_t ds = (uint32_t)max(1, (int)cvar_pt_sharc_downscale->value);
 +		uint32_t w = (qvk.extent_render.width + ds - 1) / ds;
 +		uint32_t h = (qvk.extent_render.height + ds - 1) / ds;
@@ -95,9 +94,9 @@ index 15c63a3f..f710f0e5 100644
 +	}
 +	else if (mode == 2)
 +	{
-+		// KRC : compteurs, cellules des pixels et chemins (Neyman), liste libre, éviction, résolution
++		// KRC: counters, pixel cells and paths (Neyman), free list, eviction, resolve
 +		uint32_t n = vkpt_rc_krc_cells();
-+		int passes = (int)cvar_pt_krc_passes->value; // débogage : passes actives (bits)
++		int passes = (int)cvar_pt_krc_passes->value; // debugging: active passes (bits)
 +		if (passes & 1) { dispatch_rays(cmd_buf, PIPELINE_CACHE_FIRST + 2, push, 1, 1, 1); cache_barrier(cmd_buf); }
 +		if (passes & 2) { dispatch_rays(cmd_buf, PIPELINE_CACHE_FIRST + 3, push, qvk.extent_render.width, qvk.extent_render.height, 1); cache_barrier(cmd_buf); }
 +		if (passes & 4) { dispatch_rays(cmd_buf, PIPELINE_CACHE_FIRST + 4, push, 1, 1, 1); cache_barrier(cmd_buf); }
@@ -111,7 +110,7 @@ index 15c63a3f..f710f0e5 100644
  		}
  	};
  
-+	// passes des caches de radiance : spec_pass = 0..6
++	// passes of the radiance caches: spec_pass = 0..6
 +	uint32_t cache_numbers[7] = { 0, 1, 2, 3, 4, 5, 6 };
 +	VkSpecializationInfo cache_spec_info[7];
 +	for (int i = 0; i < 7; i++)
@@ -157,17 +156,17 @@ index 261ea46b..85c9dedf 100644
  
  #define SHARC_CAPACITY (1u << 22)
  
-+#define KRC_TABLE      (1u << 22)   // cases de la table de hachage
-+#define KRC_CELLS      (1u << 20)   // cellules
-+#define KRC_CELL_SIZE  48           // octets, struct KrcCell
-+#define KRC_ACC        10           // accumulateurs 64 bits par cellule
++#define KRC_TABLE      (1u << 22)   // slots of the hash table
++#define KRC_CELLS      (1u << 20)   // cells
++#define KRC_CELL_SIZE  48           // bytes, struct KrcCell
++#define KRC_ACC        10           // 64-bit accumulators per cell
 +#define KRC_CTR        64           // compteurs 64 bits
-+#define KRC_K          4            // cellules par pixel
++#define KRC_K          4            // cells per pixel
 +#define KRC_MAX_PIXELS (2560u * 1600u)
 +
- static BufferResource_t buf_sharc_hash;     // clés 64 bits
- static BufferResource_t buf_sharc_accum;    // accumulation de la frame, 16 octets
- static BufferResource_t buf_sharc_resolved; // données résolues, 16 octets
+ static BufferResource_t buf_sharc_hash;     // 64-bit keys
+ static BufferResource_t buf_sharc_accum;    // accumulation of the frame, 16 bytes
+ static BufferResource_t buf_sharc_resolved; // resolved data, 16 bytes
 +
 +static BufferResource_t buf_krc_keys, buf_krc_vals, buf_krc_cells, buf_krc_acc, buf_krc_ctr,
 +	buf_krc_vis, buf_krc_free, buf_krc_pix;
@@ -222,7 +221,7 @@ index 261ea46b..85c9dedf 100644
 +	ubo->rc_krc[3] = 0;
  	memcpy(cam_pos_prev, ubo->cam_pos, sizeof(cam_pos_prev));
  
- 	// changer de méthode : on repart d'un cache vide, pour une comparaison juste
+ 	// switching method: start again from an empty cache, for a fair comparison
 @@ -112,6 +151,11 @@ vkpt_rc_clear_if_needed(VkCommandBuffer cmd_buf)
  	vkCmdFillBuffer(cmd_buf, buf_sharc_hash.buffer, 0, VK_WHOLE_SIZE, 0);
  	vkCmdFillBuffer(cmd_buf, buf_sharc_accum.buffer, 0, VK_WHOLE_SIZE, 0);
@@ -250,27 +249,27 @@ index 6d325b34..974df814 100644
 --- a/src/refresh/vkpt/shader/global_ubo.h
 +++ b/src/refresh/vkpt/shader/global_ubo.h
 @@ -43,6 +43,12 @@ with this program; if not, write to the Free Software Foundation, Inc.,
- 	UBO_CVAR_DO(pt_sharc_downscale, 5) /* SHaRC : un pixel mis à jour par bloc NxN */ \
- 	UBO_CVAR_DO(pt_sharc_radiance_scale, 1000) /* SHaRC : quantification de l'accumulation */ \
- 	UBO_CVAR_DO(pt_cache_bounces, 4) /* rebonds des chemins de mise à jour du cache */ \
-+	UBO_CVAR_DO(pt_krc_ppp, 0.25) /* KRC : chemins par pixel et par frame (moyenne, allocation de Neyman) */ \
-+	UBO_CVAR_DO(pt_krc_cell_px, 16) /* KRC : taille d'une cellule à l'écran, en pixels */ \
-+	UBO_CVAR_DO(pt_krc_hist, 256) /* KRC : historique maximal d'une cellule (échantillons) */ \
-+	UBO_CVAR_DO(pt_krc_delta, 1) /* KRC : chemins corrélés (lumière d'avant / d'après des lampes animées) */ \
-+	UBO_CVAR_DO(pt_krc_detect, 1) /* KRC : détection de changement non expliqué (porte, objet) */ \
-+	UBO_CVAR_DO(pt_krc_passes, 31) /* KRC, débogage : passes actives (bits : compteurs, pixels, liste libre, éviction, résolution) */ \
+ 	UBO_CVAR_DO(pt_sharc_downscale, 5) /* SHaRC: one updated pixel per NxN block */ \
+ 	UBO_CVAR_DO(pt_sharc_radiance_scale, 1000) /* SHaRC: quantisation of the accumulation */ \
+ 	UBO_CVAR_DO(pt_cache_bounces, 4) /* bounces of the cache update paths */ \
++	UBO_CVAR_DO(pt_krc_ppp, 0.25) /* KRC: paths per pixel per frame (mean, Neyman allocation) */ \
++	UBO_CVAR_DO(pt_krc_cell_px, 16) /* KRC: size of a cell on screen, in pixels */ \
++	UBO_CVAR_DO(pt_krc_hist, 256) /* KRC: maximum history of a cell (samples) */ \
++	UBO_CVAR_DO(pt_krc_delta, 1) /* KRC: correlated paths (light before / after of animated lamps) */ \
++	UBO_CVAR_DO(pt_krc_detect, 1) /* KRC: detection of unexplained changes (door, object) */ \
++	UBO_CVAR_DO(pt_krc_passes, 31) /* KRC, debugging: active passes (bits: counters, pixels, free list, eviction, resolve) */ \
  	UBO_CVAR_DO(flt_antilag_hf, 1) /* A-SVGF anti-lag filter strength, [0..inf) */ \
  	UBO_CVAR_DO(flt_antilag_lf, 0.2) \
  	UBO_CVAR_DO(flt_antilag_spec, 2) \
 @@ -232,6 +238,11 @@ with this program; if not, write to the Free Software Foundation, Inc.,
- 	GLOBAL_UBO_VAR_LIST_DO(uvec4,           rc_addr_a) /* cache de radiance : SHaRC clés (xy), accumulation (zw) */ \
- 	GLOBAL_UBO_VAR_LIST_DO(uvec4,           rc_addr_b) /* SHaRC résolu (xy), capacité (z), frame (w) */ \
+ 	GLOBAL_UBO_VAR_LIST_DO(uvec4,           rc_addr_a) /* radiance cache: SHaRC keys (xy), accumulation (zw) */ \
+ 	GLOBAL_UBO_VAR_LIST_DO(uvec4,           rc_addr_b) /* SHaRC resolved (xy), capacity (z), frame (w) */ \
  	GLOBAL_UBO_VAR_LIST_DO(vec4,            rc_cam_pos_prev) \
-+	GLOBAL_UBO_VAR_LIST_DO(uvec4,           rc_addr_c) /* KRC : clés (xy), valeurs (zw) de la table */ \
-+	GLOBAL_UBO_VAR_LIST_DO(uvec4,           rc_addr_d) /* KRC : cellules (xy), accumulateurs (zw) */ \
-+	GLOBAL_UBO_VAR_LIST_DO(uvec4,           rc_addr_e) /* KRC : compteurs (xy), cellules visibles (zw) */ \
-+	GLOBAL_UBO_VAR_LIST_DO(uvec4,           rc_addr_f) /* KRC : liste libre (xy), cellules des pixels (zw) */ \
-+	GLOBAL_UBO_VAR_LIST_DO(uvec4,           rc_krc) /* KRC : masque de la table, capacité, pixels max, - */ \
++	GLOBAL_UBO_VAR_LIST_DO(uvec4,           rc_addr_c) /* KRC: keys (xy), values (zw) of the table */ \
++	GLOBAL_UBO_VAR_LIST_DO(uvec4,           rc_addr_d) /* KRC: cells (xy), accumulators (zw) */ \
++	GLOBAL_UBO_VAR_LIST_DO(uvec4,           rc_addr_e) /* KRC: counters (xy), visible cells (zw) */ \
++	GLOBAL_UBO_VAR_LIST_DO(uvec4,           rc_addr_f) /* KRC: free list (xy), pixel cells (zw) */ \
++	GLOBAL_UBO_VAR_LIST_DO(uvec4,           rc_krc) /* KRC: table mask, capacity, max pixels, - */ \
  	\
  	GLOBAL_UBO_VAR_LIST_DO(DynLightData,    dyn_light_data[MAX_LIGHT_SOURCES]) \
  	GLOBAL_UBO_VAR_LIST_DO(vec4,            cam_pos) \
@@ -282,7 +281,7 @@ index f5b5b857..043124bb 100644
  
  layout(constant_id = 0) const uint spec_bounce_index = 0;
  
-+// KRC (pt_cache 2) : indirect diffus du pixel lu dans ses cellules, ajouté au canal LF
++// KRC (pt_cache 2): diffuse indirect of the pixel read from its cells, added to the LF channel
 +vec3 krc_lf = vec3(0);
 +vec3 krc_lf_direction = vec3(0, 0, 1);
 +bool krc_used = false;
@@ -294,10 +293,10 @@ index f5b5b857..043124bb 100644
  		}
  	}
  
-+	// KRC : l'indirect diffus vient des cellules du pixel (même grandeur que le rebond diffus
-+	// du jeu, 1 - F compris, avec tous les rebonds) ; le rayon diffus n'est plus tracé, ni le
-+	// second rebond qui le suivrait. Le reflet spéculaire reste celui du jeu. Tant que les
-+	// cellules du pixel n'ont pas d'échantillon, le jeu trace son rayon diffus comme avant.
++	// KRC: the diffuse indirect comes from the pixel's cells (same quantity as the game's diffuse
++	// bounce, 1 - F included, with every bounce); the diffuse ray is no longer traced, nor the
++	// second bounce that would follow it. The specular reflection stays the game's. As long as the
++	// pixel's cells have no sample, the game traces its diffuse ray as before.
 +	if (spec_bounce_index == 0 && cache_mode() == CACHE_KRC)
 +	{
 +		vec3 cell_value;
@@ -357,12 +356,12 @@ index 8fb70219..551b3808 100644
  }
  
 +// ========================================================================== //
-+// KRC (pt_cache 2). Cellules en espace monde, de taille ≈ pt_krc_cell_px pixels
-+// à l'écran (niveaux en puissances de 2 selon la distance) et par face (axe
-+// dominant de la normale). Chaque pixel lit K = 4 cellules, décalées au hasard
-+// d'au plus une demi-cellule : l'indirect diffus du pixel est leur moyenne
-+// tronquée. Une cellule stocke la même grandeur que le canal LF du jeu
-+// (indirect diffus démodulé, avec le facteur 1 - F du jeu).
++// KRC (pt_cache 2). World-space cells, sized ≈ pt_krc_cell_px pixels
++// on screen (power-of-2 levels by distance) and per face (dominant axis
++// of the normal). Each pixel reads K = 4 cells, randomly offset
++// by at most half a cell: the pixel's diffuse indirect is their truncated
++// mean. A cell stores the same quantity as the game's LF channel
++// (demodulated diffuse indirect, with the game's 1 - F factor).
 +// ========================================================================== //
 +
 +layout(buffer_reference, std430, buffer_reference_align = 4) buffer KrcU32 { uint v[]; };
@@ -370,14 +369,14 @@ index 8fb70219..551b3808 100644
 +
 +struct KrcCell
 +{
-+	vec3 mean;      // indirect moyen (démodulé)
-+	float n;        // échantillons dans l'historique (plafonné à pt_krc_hist)
++	vec3 mean;      // mean indirect (demodulated)
++	float n;        // samples in the history (capped at pt_krc_hist)
 +	float lmean;    // luminance moyenne
-+	float var;      // variance par échantillon de la luminance (moyenne glissante)
-+	uint seen;      // dernière frame (horloge KRC) où la cellule a servi
++	float var;      // per-sample variance of the luminance (running mean)
++	uint seen;      // last frame (KRC clock) where the cell was used
 +	uint key;
-+	uint slot;      // case de la table + 1 (0 : libre)
-+	float sigma;    // écart-type par échantillon (allocation de Neyman)
++	uint slot;      // table slot + 1 (0: free)
++	float sigma;    // per-sample standard deviation (Neyman allocation)
 +	uint born;
 +	uint pad;
 +};
@@ -387,20 +386,20 @@ index 8fb70219..551b3808 100644
 +#define KRC_NONE     0xffffffffu
 +#define KRC_TOMB     0xffffffffu
 +#define KRC_FX       65536.0
-+// accumulateurs par cellule (64 bits, virgule fixe KRC_FX)
++// accumulators per cell (64 bits, KRC_FX fixed point)
 +#define KRC_ACC      10
-+#define KRC_A_FOOT   0   // pixels qui lisent la cellule dans la frame
-+#define KRC_A_FN     1   // échantillons de la frame
++#define KRC_A_FOOT   0   // pixels that read the cell in the frame
++#define KRC_A_FN     1   // samples of the frame
 +#define KRC_A_SUM    2   // 2..4 : somme rgb
 +#define KRC_A_LUM    5
 +#define KRC_A_LUM2   6
-+#define KRC_A_DELTA  7   // 7..9 : somme rgb des différences « après - avant » (signée)
++#define KRC_A_DELTA  7   // 7..9: rgb sum of the "after - before" differences (signed)
 +// compteurs (64 bits)
 +#define KRC_C_CELLS     0
 +#define KRC_C_NVIS      1
 +#define KRC_C_FREE      2
 +#define KRC_C_POP       3
-+#define KRC_C_SIG       4   // Σ sigma des pixels qui échantillonnent (virgule fixe)
++#define KRC_C_SIG       4   // Σ sigma of the sampling pixels (fixed point)
 +#define KRC_C_PIX       5
 +#define KRC_C_SIG_PREV  6
 +#define KRC_C_PIX_PREV  7
@@ -425,14 +424,14 @@ index 8fb70219..551b3808 100644
 +	return h;
 +}
 +
-+// angle (en radians) couvert par un pixel
++// angle (in radians) covered by a pixel
 +float krc_pixel_angle()
 +{
 +	return 2.0 / (abs(global_ubo.P[1][1]) * float(global_ubo.height));
 +}
 +
-+// clé de la cellule du point p (normale n, à la distance dist de la caméra), décalée de
-+// jitter (en fractions de cellule)
++// key of the cell of point p (normal n, at distance dist from the camera), offset by
++// jitter (in fractions of a cell)
 +uint krc_key(vec3 p, vec3 n, float dist, vec3 jitter, out float size)
 +{
 +	float target = global_ubo.pt_krc_cell_px * max(dist, 1.0) * krc_pixel_angle();
@@ -452,7 +451,7 @@ index 8fb70219..551b3808 100644
 +	return h;
 +}
 +
-+// cellule existante pour la clé, ou KRC_NONE
++// existing cell for the key, or KRC_NONE
 +uint krc_find(uint key)
 +{
 +	uint mask = global_ubo.rc_krc.x;
@@ -473,8 +472,8 @@ index 8fb70219..551b3808 100644
 +	return KRC_NONE;
 +}
 +
-+// indirect diffus d'un pixel (canal LF) : moyenne tronquée de ses K cellules (sans la plus
-+// claire ni la plus sombre quand il y en a 4) ; false si aucune cellule n'a d'échantillon
++// diffuse indirect of a pixel (LF channel): truncated mean of its K cells (without the
++// brightest or the darkest when there are 4); false if no cell has a sample
 +bool krc_pixel_indirect(ivec2 ipos, out vec3 value)
 +{
 +	value = vec3(0);
@@ -524,12 +523,12 @@ index f7339164..d320ae20 100644
  }
  
 +// ---------------------------------------------------------------- KRC
-+// Éclairage direct diffus d'un sommet avec la lumière de la frame (d_new) et celle de la
-+// frame précédente (d_old), pour le même tirage : même lampe, même point, même rayon d'ombre.
-+// Copie de get_direct_illumination / sample_polygonal_lights du jeu, en diffus, avec une
-+// différence : la lampe est tirée selon max(intensité, intensité précédente), pour qu'une
-+// lampe qui s'éteint soit encore tirée et que sa disparition soit mesurée.
-+// Les lampes dynamiques et le ciel sont pris identiques avant et après.
++// Diffuse direct lighting of a vertex with the light of the frame (d_new) and that of the
++// previous frame (d_old), for the same sample: same lamp, same point, same shadow ray.
++// Copy of the game's get_direct_illumination / sample_polygonal_lights, diffuse, with one
++// difference: the lamp is sampled by max(intensity, previous intensity), so that a
++// lamp turning off is still sampled and its disappearance is measured.
++// Dynamic lamps and the sky are taken as identical before and after.
 +void krc_direct(RcSurface s, vec3 view_dir, int bounce, out vec3 d_new, out vec3 d_old)
 +{
 +	d_new = vec3(0);
@@ -635,7 +634,7 @@ index f7339164..d320ae20 100644
 +	d_old = c_old * (vis * NdotL / M_PI);
 +}
 +
-+// soleil diffus d'un sommet de rebond (identique avant et après)
++// diffuse sun of a bounce vertex (identical before and after)
 +vec3 krc_sun(RcSurface s, vec3 view_dir)
 +{
 +	rng_seed = rc_hash(rc_state ^ 0x51ed270bu);
@@ -662,7 +661,7 @@ index f7339164..d320ae20 100644
 +	return c;
 +}
 +
-+// cellule de la clé, créée si besoin ; KRC_NONE si la table ou les cellules sont pleines
++// cell of the key, created if needed; KRC_NONE if the table or the cells are full
 +uint krc_insert(uint key)
 +{
 +	uint mask = global_ubo.rc_krc.x;
@@ -716,7 +715,7 @@ index f7339164..d320ae20 100644
 +	return KRC_NONE;
 +}
 +
-+// écart-type par échantillon d'une cellule pour l'allocation ; une cellule jeune reçoit un a
++// per-sample standard deviation of a cell for the allocation; a young cell gets a
 +// priori large (exploration)
 +float krc_sigma(uint c, float sigma_mean)
 +{
@@ -726,10 +725,10 @@ index f7339164..d320ae20 100644
 +	return max(cell.sigma, 1e-4);
 +}
 +
-+// Un chemin d'indirect depuis la surface primaire du pixel : même premier rebond que le jeu
-+// (cosinus autour de la normale d'ombrage, poids 1 - F), puis jusqu'à pt_cache_bounces rebonds
-+// diffus, avec arrêt sur une cellule mûre au 1er ou 2e sommet (rééchantillonnage du cache).
-+// value : estimation avec la lumière de la frame ; old : la même avec celle d'avant.
++// One indirect path from the pixel's primary surface: same first bounce as the game
++// (cosine around the shading normal, weight 1 - F), then up to pt_cache_bounces diffuse
++// bounces, stopping on a mature cell at the 1st or 2nd vertex (cache resampling).
++// value: estimate with the frame's light; old: the same with the previous one.
 +void krc_path(ivec2 ipos, RcSurface s, vec3 view_dir, out vec3 value, out vec3 old)
 +{
 +	value = vec3(0);
@@ -781,12 +780,12 @@ index f7339164..d320ae20 100644
 +		vec3 sun = krc_sun(h, dir);
 +		if (b == 1)
 +		{
-+			// atténuation du soleil au premier rebond, comme le jeu
++			// sun attenuation at the first bounce, like the game
 +			float sun_attenuation = square(clamp(1.0 - square(square(segment / global_ubo.pt_sun_bounce_range)), 0, 1));
 +			sun *= sun_attenuation;
 +		}
 +
-+		// rééchantillonnage : le reste du chemin est lu dans une cellule mûre assez éloignée
++		// resampling: the rest of the path is read from a mature cell far enough away
 +		if (uint(b) == rs_depth)
 +		{
 +			float size;
@@ -832,7 +831,7 @@ index f7339164..d320ae20 100644
 +	atomicAdd(krc_acc().v[i], uint64_t(int64_t(v * KRC_FX)));
 +}
 +
-+// passe 2 : compteurs de la frame
++// pass 2: counters of the frame
 +void krc_prep()
 +{
 +	KrcU64 ctr = krc_ctr();
@@ -844,9 +843,9 @@ index f7339164..d320ae20 100644
 +	ctr.v[KRC_C_CLOCK] += 1;
 +}
 +
-+// passe 3 : les K cellules du pixel (créées si besoin), puis ses chemins : le pixel tire une
-+// de ses cellules et y envoie en moyenne pt_krc_ppp × sigma / sigma moyen chemins (allocation
-+// de Neyman : plus de chemins là où la lumière varie)
++// pass 3: the pixel's K cells (created if needed), then its paths: the pixel picks one
++// of its cells and sends it on average pt_krc_ppp × sigma / mean sigma paths (Neyman
++// allocation: more paths where the light varies)
 +void krc_pixel(ivec2 ipos)
 +{
 +	if (ipos.x >= global_ubo.width || ipos.y >= global_ubo.height)
@@ -899,7 +898,7 @@ index f7339164..d320ae20 100644
 +		krc_path(ipos, s, view_dir, v, o);
 +		v = clamp_output(v);
 +		o = clamp_output(o);
-+		// écrêtage des lucioles : un échantillon plus de 50× la moyenne d'une cellule mûre
++		// firefly clamping: a sample more than 50× the mean of a mature cell
 +		float l = luminance(v);
 +		if (cell.n >= 8.0 && l > 50.0 * max(cell.lmean, 1e-3))
 +		{
@@ -922,7 +921,7 @@ index f7339164..d320ae20 100644
 +	}
 +}
 +
-+// passe 4 : la liste libre après les insertions
++// pass 4: the free list after the insertions
 +void krc_mid()
 +{
 +	KrcU64 ctr = krc_ctr();
@@ -931,7 +930,7 @@ index f7339164..d320ae20 100644
 +	ctr.v[KRC_C_POP] = 0;
 +}
 +
-+// passe 5 : éviction des cellules inutilisées depuis 120 frames (1/8 des cellules par frame)
++// pass 5: eviction of cells unused for 120 frames (1/8 of the cells per frame)
 +void krc_evict(uint id)
 +{
 +	KrcU64 ctr = krc_ctr();
@@ -959,10 +958,10 @@ index f7339164..d320ae20 100644
 +	return float(int64_t(krc_acc().v[i])) / KRC_FX;
 +}
 +
-+// passe 6 : résolution des cellules utilisées dans la frame. D'abord la correction corrélée :
-+// l'historique reçoit la différence « après - avant » mesurée par les chemins de la frame
-+// (lampes animées), sans rien oublier ; puis la moyenne glissante avec les nouveaux
-+// échantillons ; un changement que les différences n'expliquent pas (porte, objet) raccourcit
++// pass 6: resolve of the cells used in the frame. First the correlated correction:
++// the history receives the "after - before" difference measured by the frame's paths
++// (animated lamps), forgetting nothing; then the running mean with the new
++// samples; a change that the differences do not explain (door, object) shortens
 +// l'historique.
 +void krc_resolve(uint id)
 +{

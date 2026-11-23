@@ -1,15 +1,13 @@
 From 72e512b1c69cf34eafd8325dbe88e90ff6256b72 Mon Sep 17 00:00:00 2001
 From: Skynizz <182822215+Skynizz@users.noreply.github.com>
 Date: Sat, 24 Oct 2026 03:43:55 +0200
-Subject: [PATCH 6/9] =?UTF-8?q?Mesure=20:=20convention=20d'=C3=A9mission?=
- =?UTF-8?q?=20commune=20(KRC=5FEMIT=5FPHYS)=20;=20KRC=20:=20historique=20r?=
- =?UTF-8?q?accourci=20par=20le=20changement=20inexpliqu=C3=A9?=
+Subject: [PATCH 6/9] Measurement: shared emission convention (KRC_EMIT_PHYS); KRC: history shortened by unexplained change
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
 
-RTGL1 ajoute l'émission vue au premier rebond diffus sans le poids du rebond ; la référence et
-KRC la pondèrent. KRC_EMIT_PHYS=1 donne la même convention au jeu et à SHaRC.
+RTGL1 adds the emission seen at the first diffuse bounce without the bounce weight; the reference and
+KRC weight it. KRC_EMIT_PHYS=1 gives the same convention to the game and to SHaRC.
 
 ---
  Source/RadianceCache.cpp             |  3 ++-
@@ -28,14 +26,14 @@ index 91634e3..63600d8 100644
      fireflyFactor = EnvFloat("KRC_FIREFLY", 50);
 +    emitPhys = EnvFloat("KRC_EMIT_PHYS", 0) != 0;
  
-     // méthode, débogage, échelle SHaRC (50 : exemple du SDK ; voxel ≈ distance / échelle), accumulation
+     // method, debugging, SHaRC scale (50: SDK sample; voxel ≈ distance / scale), accumulation
      float p[5][4] = {
 @@ -142,7 +143,7 @@ void RadianceCache::FillUniform(ShGlobalUniform *gu, uint32_t frameIndex, uint32
      gu->rcKrc[0] = KRC_TABLE - 1;
      gu->rcKrc[1] = KRC_CELLS;
      gu->rcKrc[2] = KRC_MAX_PIXELS;
 -    gu->rcKrc[3] = 0;
-+    gu->rcKrc[3] = emitPhys ? 1 : 0;   // émission au premier rebond pondérée (KRC_EMIT_PHYS)
++    gu->rcKrc[3] = emitPhys ? 1 : 0;   // weighted emission at the first bounce (KRC_EMIT_PHYS)
  
      for (int i = 0; i < 3; i++)
      {
@@ -59,9 +57,9 @@ index 4d92e33..9740706 100644
          if (cell.n > 0.0 && RC_KRC_DELTA)
          {
              fd -= explained;
-+            // la part du changement que les groupes n'expliquent pas n'est mesurée que sur cette
-+            // frame (bruitée) : l'historique est raccourci d'autant, pour qu'elle se moyenne vite
-+            // au lieu de rester ~300 frames dans la moyenne
++            // the share of the change that the groups do not explain is measured only on this
++            // (noisy) frame: the history is shortened accordingly, so that it averages out quickly
++            // instead of staying ~300 frames in the mean
 +            const float relU = abs(rc_lum(fd)) / max(cell.lmean, 1e-4);
 +            if (relU > 0.02)
 +                cell.n = min(cell.n, clamp(8.0 / (relU * relU), 32.0, RC_KRC_HIST));
@@ -75,19 +73,19 @@ index af03932..c461dd6 100644
 @@ -43,6 +43,16 @@ layout (constant_id = 0) const uint maxAlbedoLayerCount = 0;
  #define SHARC_SEPARATE_EMISSIVE 1
  #include "RadianceCache.h"
- bool rcSpecularBounce = false; // le rebond en cours est le reflet spéculaire
+ bool rcSpecularBounce = false; // the current bounce is the specular reflection
 +
-+// Émission vue au premier rebond diffus. RTGL1 l'ajoute sans le poids du rebond (1 / cos, que
-+// la reconstruction en harmoniques sphériques compense pour le reste) : elle est ainsi pondérée
-+// par cos² au lieu de cos. KRC et la référence la pondèrent comme le reste ; KRC_EMIT_PHYS=1
-+// donne la même convention au jeu et à SHaRC, pour comparer les caches et non les conventions.
-+// weight : poids du rebond, déjà multiplié par l'albédo du point touché.
++// Emission seen at the first diffuse bounce. RTGL1 adds it without the bounce weight (1 / cos, which
++// the spherical-harmonics reconstruction compensates for the rest): it is thus weighted
++// by cos² instead of cos. KRC and the reference weight it like the rest; KRC_EMIT_PHYS=1
++// gives the same convention to the game and to SHaRC, to compare the caches and not the conventions.
++// weight: bounce weight, already multiplied by the albedo of the hit point.
 +vec3 rc_first_emission(float emission, vec3 albedo, vec3 weight)
 +{
 +    return (globalUniform.rcKrc.w != 0 && !rcSpecularBounce) ? emission * weight : emission * albedo;
 +}
- vec3 rcSpecOld = vec3(-1.0);   // KRC : le reflet avec l'éclairage de la frame précédente (-1 : inconnu)
- vec3 rcSpecNew = vec3(0), rcSpecOldTotal = vec3(0), rcSpecDirect = vec3(0); // spéculaire du pixel
+ vec3 rcSpecOld = vec3(-1.0);   // KRC: the reflection with the previous frame's lighting (-1: unknown)
+ vec3 rcSpecNew = vec3(0), rcSpecOldTotal = vec3(0), rcSpecDirect = vec3(0); // specular of the pixel
  
 @@ -173,7 +183,7 @@ vec3 processBounce(
              if (usable && SharcGetCachedRadiance(sharcParams, sharcHit, cachedRadiance, false))

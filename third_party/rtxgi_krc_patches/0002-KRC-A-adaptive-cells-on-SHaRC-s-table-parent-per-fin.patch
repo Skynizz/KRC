@@ -1,18 +1,16 @@
 From 18aa4f11841420da25fa72acc2a3f519d448a02f Mon Sep 17 00:00:00 2001
 From: Skynizz <182822215+Skynizz@users.noreply.github.com>
 Date: Sat, 24 Oct 2026 23:55:45 +0200
-Subject: [PATCH 2/6] =?UTF-8?q?KRC-A=20:=20cellules=20adaptatives=20sur=20?=
- =?UTF-8?q?la=20table=20de=20SHaRC=20(m=C3=A8re=20par=20cellule=20fine,=20?=
- =?UTF-8?q?m=C3=A9lange=20statistique)?=
+Subject: [PATCH 2/6] KRC-A: adaptive cells on SHaRC's table (parent per fine cell, statistical blend)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
 
-- Passe krcPropagate : les sommes de la frame de chaque cellule fine vont aussi à sa mère, deux fois
-  plus grande (bit 63 de la clé).
-- Moments par entrée (variance d'une frame à l'autre de la moyenne), à la résolution.
-- Lecture : rétrécissement de James-Stein vers la mère, avec une tolérance relative.
-- Banc : tech=krc, scale=, krctol=, krcdebug=.
+- krcPropagate pass: each fine cell's frame sums also go to its parent, twice
+  as large (bit 63 of the key).
+- Moments per entry (frame-to-frame variance of the mean), at resolve time.
+- Reading: James-Stein shrinkage towards the parent, with a relative tolerance.
+- Bench: tech=krc, scale=, krctol=, krcdebug=.
 
 ---
  Samples/Pathtracer/KrcBench.cpp              |  24 ++-
@@ -34,18 +32,18 @@ index 0807d3e..720aca4 100644
 --- a/Samples/Pathtracer/KrcBench.cpp
 +++ b/Samples/Pathtracer/KrcBench.cpp
 @@ -6,7 +6,11 @@
-  *                    l'écran sert à autre chose)
-  *   KRC_OUT=dossier  sorties : images PFM (HDR linéaire, ce que lit la courbe de tons), fps.txt
+  *                    the screen is used for something else)
+  *   KRC_OUT=folder   outputs: PFM images (linear HDR, what the tone curve reads), fps.txt
   *   KRC_SCRIPT=10:tech=sharc;10:den=nrd;300:capture=sharc_f300;400:exit
-- *     tech=ref|sharc|nrc|krc   méthode (ref : chemins complets sans cache)
-+ *     tech=ref|sharc|nrc|krc   méthode (ref : chemins complets sans cache ; krc : la table de SHaRC
-+ *                              avec les cellules adaptatives de KRC)
-+ *     scale=S                  échelle des cellules (sharcSceneScale, 50 par défaut ; 100 : deux fois
-+ *                              plus fines) ; vide le cache
-+ *     krctol=T, krcdebug=0|1   tolérance relative du mélange ; affichage de la part de la mère
-  *     den=none|acc|nrd         débruiteur (acc : moyenne des frames tant que rien ne bouge)
-  *     spp=N, bounces=N         échantillons par pixel, rebonds
-  *     jitter=0|1               décalage sous-pixel (0 : même échantillonnage que NRD)
+- *     tech=ref|sharc|nrc|krc   method (ref: full paths without a cache)
++ *     tech=ref|sharc|nrc|krc   method (ref: full paths without a cache; krc: SHaRC's table
++ *                              with KRC's adaptive cells)
++ *     scale=S                  cell scale (sharcSceneScale, 50 by default; 100: twice as
++ *                              fine); clears the cache
++ *     krctol=T, krcdebug=0|1   relative tolerance of the blend; display of the parent's share
+  *     den=none|acc|nrd         denoiser (acc: mean of the frames as long as nothing moves)
+  *     spp=N, bounces=N         samples per pixel, bounces
+  *     jitter=0|1               sub-pixel offset (0: same sampling as NRD)
 @@ -86,7 +90,16 @@ void Pathtracer::KrcBenchBeforeRender()
              if (c.value == "ref")
                  m_ui.techSelection = TechSelection::None;
@@ -56,7 +54,7 @@ index 0807d3e..720aca4 100644
 +            }
 +            else if (c.value == "krc")
 +            {
-+                // KRC-A : la table de SHaRC avec les cellules adaptatives
++                // KRC-A: SHaRC's table with the adaptive cells
                  m_ui.techSelection = TechSelection::Sharc;
 +                m_ui.krcAdaptive = true;
 +            }
@@ -87,7 +85,7 @@ index f361d6e..73e307e 100644
      float sharcSceneScale;
      float sharcRoughnessThreshold;
  
-+    // branche krc : cellules adaptatives (KrcAdaptive.hlsli)
++    // krc branch: adaptive cells (KrcAdaptive.hlsli)
 +    int krcAdaptive;
 +    float krcTolerance;
 +    int krcDebug;
@@ -104,7 +102,7 @@ index 3ed7b6a..42a6411 100644
          nvrhi::BindingLayoutItem::StructuredBuffer_UAV(1),
          nvrhi::BindingLayoutItem::StructuredBuffer_UAV(2),
          nvrhi::BindingLayoutItem::StructuredBuffer_UAV(3),
-+        nvrhi::BindingLayoutItem::StructuredBuffer_UAV(4), // branche krc : moments des cellules
++        nvrhi::BindingLayoutItem::StructuredBuffer_UAV(4), // krc branch: cell moments
      };
      m_sharcBindingLayout = GetDevice()->createBindingLayout(bindingLayoutDesc);
  #endif // ENABLE_SHARC
@@ -149,7 +147,7 @@ index 3ed7b6a..42a6411 100644
                  else
                      computeState.bindings = { m_globalBindingSet, m_dummyBindingSets[1], m_dummyBindingSets[2], m_sharcBindingSet };
  
-+                // branche krc : remontée des cellules fines vers leurs mères, avant la résolution
++                // krc branch: propagation of the fine cells to their parents, before the resolve
 +                if (m_ui.krcAdaptive)
 +                {
 +                    computeState.pipeline = m_pathtracerPipelines->GetKrcPropagatePSO();
@@ -169,7 +167,7 @@ index 3dafed1..9640cb8 100644
      nvrhi::BufferHandle m_sharcLockBuffer;
      nvrhi::BufferHandle m_sharcAccumulationBuffer;
      nvrhi::BufferHandle m_sharcResolvedBuffer;
-+    nvrhi::BufferHandle m_krcMomentsBuffer; // branche krc : moments des cellules (KrcAdaptive.hlsli)
++    nvrhi::BufferHandle m_krcMomentsBuffer; // krc branch: cell moments (KrcAdaptive.hlsli)
  
      nvrhi::BindingLayoutHandle m_sharcBindingLayout;
      nvrhi::BindingSetHandle m_sharcBindingSet;
@@ -182,7 +180,7 @@ index dfc0e7c..1197935 100644
          pipelineDesc.CS = m_sharcResolveCS;
          m_sharcResolvePSO = device->createComputePipeline(pipelineDesc);
 +
-+        // branche krc : remontée des cellules fines vers leurs mères
++        // krc branch: propagation of the fine cells to their parents
 +        m_krcPropagateCS = shaderFactory.CreateShader("app/Shaders/SharcResolve.hlsl", "krcPropagate", nullptr, nvrhi::ShaderType::Compute);
 +        pipelineDesc.CS = m_krcPropagateCS;
 +        m_krcPropagatePSO = device->createComputePipeline(pipelineDesc);
@@ -229,20 +227,20 @@ index 0000000..310f3b9
 +++ b/Samples/Pathtracer/Shaders/KrcAdaptive.hlsli
 @@ -0,0 +1,164 @@
 +/*
-+ * Branche krc : cellules adaptatives de KRC (KRC-A) sur la table de hachage de SHaRC.
++ * krc branch: KRC's adaptive cells (KRC-A) on SHaRC's hash table.
 + *
-+ * Chaque cellule fine (celles de SHaRC) a une mère deux fois plus grande, dans la même table, marquée
-+ * par le bit 63 de la clé (réservé par SHaRC aux données de l'utilisateur ; l'éclairage réactif, qui
-+ * l'utilise, est désactivé dans cet exemple). Les sommes de la frame d'une cellule fine sont ajoutées
-+ * à sa mère (krcPropagate, avant la résolution de SHaRC), qui se résout comme les autres.
++ * Each fine cell (SHaRC's) has a parent twice as large, in the same table, marked
++ * by bit 63 of the key (reserved by SHaRC for user data; reactive lighting, which
++ * uses it, is disabled in this sample). A fine cell's frame sums are added
++ * to its parent (krcPropagate, before SHaRC's resolve), which resolves like the others.
 + *
-+ * La lecture mélange fine et mère (rétrécissement de James-Stein) : là où elles ne diffèrent pas plus
-+ * que leur incertitude (variance d'une frame à l'autre de leur moyenne, ramenée au nombre de frames
-+ * accumulées), on lit la mère, avec bien plus d'échantillons ; là où la lumière change vraiment à
-+ * l'échelle de la mère (bord, ombre), on lit la fine, sans fuite.
++ * Reading blends fine and parent (James-Stein shrinkage): where they do not differ by more
++ * than their uncertainty (frame-to-frame variance of their mean, scaled to the number of
++ * accumulated frames), the parent is read, with many more samples; where the light really changes at
++ * the parent's scale (edge, shadow), the fine one is read, with no leak.
 + *
-+ * Requiert SharcCommon.h et u_KrcMoments (float4 par entrée : moyenne glissante de la luminance
-+ * moyenne de la frame, de son carré, nombre de frames comptées).
++ * Requires SharcCommon.h and u_KrcMoments (float4 per entry: running mean of the frame's mean
++ * luminance, of its square, number of counted frames).
 + */
 +
 +#ifndef KRC_ADAPTIVE_HLSLI
@@ -255,8 +253,8 @@ index 0000000..310f3b9
 +    return (key & KRC_MOTHER_BIT) != 0;
 +}
 +
-+// clé de la mère : position divisée par 2, niveau + 1 (cellule deux fois plus grande), même
-+// classe de normale
++// parent key: position divided by 2, level + 1 (cell twice as large), same
++// normal class
 +HashGridKey KrcMotherKey(HashGridKey key)
 +{
 +    int3 p;
@@ -264,7 +262,7 @@ index 0000000..310f3b9
 +    p.y = int((key >> (HASH_GRID_POSITION_BIT_NUM * 1)) & HASH_GRID_POSITION_BIT_MASK);
 +    p.z = int((key >> (HASH_GRID_POSITION_BIT_NUM * 2)) & HASH_GRID_POSITION_BIT_MASK);
 +    p = (p << (32 - HASH_GRID_POSITION_BIT_NUM)) >> (32 - HASH_GRID_POSITION_BIT_NUM);
-+    p = p >> 1; // division entière vers -infini
++    p = p >> 1; // integer division towards -infinity
 +    uint level = uint((key >> HASH_GRID_LEVEL_BIT_OFFSET) & HASH_GRID_LEVEL_BIT_MASK);
 +    level = min(level + 1, HASH_GRID_LEVEL_BIT_MASK);
 +    HashGridKey m = ((HashGridKey(p.x) & HASH_GRID_POSITION_BIT_MASK) << (HASH_GRID_POSITION_BIT_NUM * 0))
@@ -275,8 +273,8 @@ index 0000000..310f3b9
 +    return m | KRC_MOTHER_BIT;
 +}
 +
-+// passe de remontée (avant la résolution) : les sommes de la frame d'une cellule fine vont aussi
-+// à sa mère, créée au besoin
++// propagation pass (before the resolve): a fine cell's frame sums also go
++// to its parent, created if needed
 +void KrcPropagateEntry(uint entryIndex, SharcParameters sharcParameters)
 +{
 +    if (entryIndex >= sharcParameters.hashGridData.capacity)
@@ -299,8 +297,8 @@ index 0000000..310f3b9
 +    InterlockedAdd(BUFFER_AT_OFFSET(sharcParameters.accumulationBuffer, motherIndex).data.w, acc.data.w);
 +}
 +
-+// avant SharcResolveEntry (qui efface les sommes de la frame) : moyenne glissante de la luminance
-+// moyenne de la frame et de son carré, d'où la variance d'une frame à l'autre
++// before SharcResolveEntry (which clears the frame sums): running mean of the frame's mean
++// luminance and of its square, giving the frame-to-frame variance
 +void KrcResolveMoments(uint entryIndex, SharcParameters sharcParameters, uint accumulationFrameNum,
 +                       RWStructuredBuffer<float4> moments)
 +{
@@ -329,9 +327,9 @@ index 0000000..310f3b9
 +struct KrcCellRead
 +{
 +    bool found;
-+    float3 radiance;   // démodulée
++    float3 radiance;   // demodulated
 +    float lum;
-+    float varMean;     // variance de la valeur lue (moyenne sur les frames accumulées)
++    float varMean;     // variance of the value read (mean over the accumulated frames)
 +};
 +
 +KrcCellRead KrcReadCell(SharcParameters sharcParameters, HashGridKey key, RWStructuredBuffer<float4> moments)
@@ -357,8 +355,8 @@ index 0000000..310f3b9
 +    return r;
 +}
 +
-+// lecture KRC-A au point touché : mélange de la cellule fine et de sa mère. tolerance : écart relatif
-+// en dessous duquel fine et mère sont tenues pour égales (on lit la mère, moins bruitée)
++// KRC-A read at the hit point: blend of the fine cell and its parent. tolerance: relative gap
++// below which fine and parent are taken as equal (the parent, less noisy, is read)
 +bool KrcGetCachedRadiance(SharcParameters sharcParameters, SharcHitData hitData, float tolerance,
 +                          RWStructuredBuffer<float4> moments, out float3 radiance, out float motherWeight)
 +{
@@ -411,7 +409,7 @@ index 6b2d506..064c91f 100644
  
                  float3 sharcRadiance;
 -                if (isValidHit && SharcGetCachedRadiance(sharcParameters, sharcHitData, sharcRadiance, false))
-+                // branche krc : cellules adaptatives (mélange de la cellule fine et de sa mère)
++                // krc branch: adaptive cells (blend of the fine cell and its parent)
 +                float krcMotherWeight = 0.0f;
 +                bool cached = false;
 +                if (isValidHit)
@@ -423,7 +421,7 @@ index 6b2d506..064c91f 100644
 +                }
 +                if (cached && g_Lighting.krcDebug && bounce == 1)
 +                {
-+                    // débogage : part de la mère dans la lecture (rouge = mère, vert = fine)
++                    // debugging: share of the parent in the read (red = parent, green = fine)
 +                    u_Output[DispatchRaysIndex().xy] = float4(krcMotherWeight, 1.0f - krcMotherWeight, 0.0f, 1.0f);
 +                    return;
 +                }
@@ -457,7 +455,7 @@ index 89e3c63..a43dae7 100644
 \ No newline at end of file
 +}
 +
-+// branche krc : passe de remontée des cellules fines vers leurs mères, avant sharcResolve
++// krc branch: propagation pass of the fine cells to their parents, before sharcResolve
 +[numthreads(LINEAR_BLOCK_SIZE, 1, 1)]
 +void krcPropagate(in uint2 did : SV_DispatchThreadID)
 +{
@@ -483,7 +481,7 @@ index 9c9780c..9de8919 100644
      int sharcStaleFrameNum = 60;
      float sharcRoughnessThreshold = 0.4f;
 +
-+    // branche krc : cellules adaptatives (mélange statistique cellule fine / mère)
++    // krc branch: adaptive cells (statistical blend fine cell / parent)
 +    bool krcAdaptive = false;
 +    float krcTolerance = 0.03f;
 +    bool krcDebug = false;

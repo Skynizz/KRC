@@ -1,10 +1,7 @@
 From a6e7e72ecad24a6063a91a4bf0a51b447419e3de Mon Sep 17 00:00:00 2001
 From: Skynizz <182822215+Skynizz@users.noreply.github.com>
 Date: Wed, 28 Oct 2026 15:00:52 +0100
-Subject: [PATCH 6/6] =?UTF-8?q?Labo=20KRC-SSGI=20:=20=C3=A9clairage=20glob?=
- =?UTF-8?q?al=20=C3=A0=20l'=C3=A9cran=20(masque=20de=20visibilit=C3=A9,=20?=
- =?UTF-8?q?ciel=20vu=20=C3=A0=20l'=C3=A9cran),=20mode=20lumi=C3=A8re=20dir?=
- =?UTF-8?q?ecte=20seule?=
+Subject: [PATCH 6/6] KRC-SSGI lab: screen-space global illumination (visibility bitmask, sky seen on screen), direct-light-only mode
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
@@ -25,15 +22,15 @@ index 04600d1..d990301 100644
 --- a/Samples/Pathtracer/KrcBench.cpp
 +++ b/Samples/Pathtracer/KrcBench.cpp
 @@ -30,6 +30,11 @@
-  *                              l'historique, 2 normalisation de l'entrée (historique rééclairé)
-  *     nrdreset                 vide l'historique de NRD (ce qu'un moteur peut faire quand ses lampes changent)
-  *     lights                   liste des lampes dans KRC_OUT/lights.txt
-+ *     ssgi=0|1                 éclairage global à l'écran (KrcScreenGI.hlsl) sur l'image du « jeu »
-+ *                              (bounces=1 den=acc : lumière directe sans bruit) ; capture sa sortie
-+ *     ssgiradius, ssgithick, ssgislices, ssgisteps, ssgihistory, ssgifilter : réglages
-+ *     ssginormals=0|1, ssgialbedo=0|1 : G-buffer, ou déduits de l'image (comme ReShade)
-+ *     ssgidebug=1              indirect seul
-  *     clear                    vide le cache (SHaRC)
+  *                              confidence, 2 input normalisation (relit history)
+  *     nrdreset                 clears NRD's history (what an engine can do when its lamps change)
+  *     lights                   list of lamps in KRC_OUT/lights.txt
++ *     ssgi=0|1                 screen-space global illumination (KrcScreenGI.hlsl) on the "game" image
++ *                              (bounces=1 den=acc: noise-free direct light); captures its output
++ *     ssgiradius, ssgithick, ssgislices, ssgisteps, ssgihistory, ssgifilter: settings
++ *     ssginormals=0|1, ssgialbedo=0|1: G-buffer, or derived from the image (like ReShade)
++ *     ssgidebug=1              indirect only
+  *     clear                    clears the cache (SHaRC)
   *     exit                     quitte
   */
 @@ -49,6 +54,8 @@ using namespace donut::math;
@@ -91,8 +88,8 @@ index 04600d1..d990301 100644
      m_krcRelightEvents = constants.krcRelightEvent;
  }
 +
-+// Éclairage global à l'écran (Shaders/KrcScreenGI.hlsl) : labo de l'effet ReShade. Quatre passes :
-+// tracé, accumulation temporelle, filtre à-trous, composition. Ressources créées au premier appel.
++// Screen-space global illumination (Shaders/KrcScreenGI.hlsl): lab for the ReShade effect. Four passes:
++// trace, temporal accumulation, à-trous filter, composite. Resources created on the first call.
 +namespace
 +{
 +struct KrcSsgiConstantsCpu
@@ -213,7 +210,7 @@ index 04600d1..d990301 100644
 +    run(m_krcSsgiTracePSO, base, 1);
 +    run(m_krcSsgiTemporalPSO, base, 1);
 +
-+    // à-trous : historique -> filtre 0 -> filtre 1 -> filtre 0 ...
++    // à-trous: history -> filter 0 -> filter 1 -> filter 0 ...
 +    nvrhi::ITexture* in = historyCur;
 +    int out = 0;
 +    for (int i = 0; i < m_krcSsgi.filterPasses; i++)
@@ -232,16 +229,16 @@ index 5a21091..849912b 100644
 --- a/Samples/Pathtracer/LightingCb.h
 +++ b/Samples/Pathtracer/LightingCb.h
 @@ -53,7 +53,12 @@ struct LightingConstants
-     int krcRelightEvent;  // un rapport connu est à appliquer avant le tracé de cette frame
-     int krcLightGroups;   // groupe de la lampe i aux bits 2i..2i+1 (0 soleil, 1 et 2 lampes, 3 fixe)
-     int krcNrdConfidence; // confiance de l'historique de NRD tirée du rééclairage des cellules
--    float4 krcRelightRatio; // w : 1 si un rééclairage a eu lieu depuis la remise à zéro du cache (sinon S = 1) // rapport « après / avant » des groupes 0..2
-+    float4 krcRelightRatio; // w : 1 si un rééclairage a eu lieu depuis la remise à zéro du cache (sinon S = 1)
+     int krcRelightEvent;  // a known ratio must be applied before tracing this frame
+     int krcLightGroups;   // group of lamp i in bits 2i..2i+1 (0 sun, 1 and 2 lamps, 3 fixed)
+     int krcNrdConfidence; // NRD history confidence derived from the cells' relighting
+-    float4 krcRelightRatio; // w: 1 if a relighting happened since the cache was reset (otherwise S = 1) // "after / before" ratio of groups 0..2
++    float4 krcRelightRatio; // w: 1 if a relighting happened since the cache was reset (otherwise S = 1)
 +
-+    int krcDirectOnly;    // lumière directe seule, G-buffer compris (labo de KRC-SSGI)
++    int krcDirectOnly;    // direct light only, G-buffer included (KRC-SSGI lab)
 +    int krcPad1;
 +    int krcPad2;
-+    int krcPad3; // rapport « après / avant » des groupes 0..2
++    int krcPad3; // "after / before" ratio of groups 0..2
  
      float4 sharcCameraPosition;
      float4 sharcCameraPositionPrev;
@@ -270,7 +267,7 @@ index 32998c4..6af670c 100644
          m_commandList->draw(args);
      }
  
-+    // branche krc : éclairage global à l'écran, sur l'image du « jeu » (accumulée si den=acc)
++    // krc branch: screen-space global illumination, on the "game" image (accumulated if den=acc)
 +    if (m_krcSsgi.enable)
 +        KrcScreenGI(m_ui.denoiserType == DenoiserType::Accumulation ? m_accumulationBuffer.Get() : m_renderTargets->outPathTracer.Get());
 +
@@ -285,19 +282,19 @@ index 03b910b..7e4b36d 100644
      void KrcBenchAfterRender();
      void KrcCapture(const std::string& path);
      void KrcFillRelight(struct LightingConstants& constants);
-+    void KrcScreenGI(nvrhi::ITexture* color); // éclairage global à l'écran (Shaders/KrcScreenGI.hlsl)
++    void KrcScreenGI(nvrhi::ITexture* color); // screen-space global illumination (Shaders/KrcScreenGI.hlsl)
  
  private:
      struct KrcCommand
 @@ -105,7 +106,30 @@ private:
-     KrcRelightHost m_krcRelightHost;     // rapport « après / avant » des groupes (Libraries/Krc)
+     KrcRelightHost m_krcRelightHost;     // "after / before" ratio of the groups (Libraries/Krc)
      int m_krcRelightEvents = 0;
      bool m_krcNrdReset = false;
--    bool m_krcRelightSinceClear = false; // S vaut 1 partout tant qu'aucun rééclairage n'a eu lieu          // historique de NRD vidé à la prochaine frame
-+    bool m_krcDirectOnly = false;        // lumière directe seule (labo de KRC-SSGI)
-+    bool m_krcRelightSinceClear = false; // S vaut 1 partout tant qu'aucun rééclairage n'a eu lieu
+-    bool m_krcRelightSinceClear = false; // S is 1 everywhere as long as no relighting has happened          // NRD history cleared on the next frame
++    bool m_krcDirectOnly = false;        // direct light only (KRC-SSGI lab)
++    bool m_krcRelightSinceClear = false; // S is 1 everywhere as long as no relighting has happened
 +
-+    // éclairage global à l'écran (labo de l'effet ReShade)
++    // screen-space global illumination (lab for the ReShade effect)
 +    struct KrcSsgiSettings
 +    {
 +        bool enable = false;
@@ -317,7 +314,7 @@ index 03b910b..7e4b36d 100644
 +    nvrhi::BufferHandle m_krcSsgiConstants;
 +    nvrhi::ComputePipelineHandle m_krcSsgiTracePSO, m_krcSsgiTemporalPSO, m_krcSsgiFilterPSO, m_krcSsgiCompositePSO;
 +    nvrhi::TextureHandle m_krcSsgiRaw, m_krcSsgiHistory[2], m_krcSsgiPrevRadiance, m_krcSsgiPrevDepth, m_krcSsgiOut, m_krcSsgiFilter[2];
-+    uint32_t m_krcSsgiFrame = 0;          // historique de NRD vidé à la prochaine frame
++    uint32_t m_krcSsgiFrame = 0;          // NRD history cleared on the next frame
      std::string m_krcOut;
      std::string m_krcCaptureName;
      uint32_t m_krcFrame = 0;
@@ -328,21 +325,21 @@ index 0000000..fea78e8
 +++ b/Samples/Pathtracer/Shaders/KrcScreenGI.hlsl
 @@ -0,0 +1,360 @@
 +/*
-+ * Branche krc : éclairage global à l'écran (KRC-SSGI), labo de l'effet ReShade.
++ * krc branch: screen-space global illumination (KRC-SSGI), lab for the ReShade effect.
 + *
-+ * Entrées comme dans un jeu vu par ReShade : couleur sans éclairage indirect et profondeur (plus,
-+ * en option, les normales et l'albédo du G-buffer pour la version « idéale »). Sortie : couleur +
-+ * albédo × éclairage indirect. Le path tracer complet sert de référence.
++ * Inputs as in a game seen by ReShade: colour without indirect lighting and depth (plus,
++ * optionally, the G-buffer normals and albedo for the "ideal" version). Output: colour +
++ * albedo × indirect lighting. The full path tracer serves as the reference.
 + *
-+ * 1. krcSsgiTrace : masque de visibilité (Therrien, Levesque, Gilet, « Screen Space Indirect
-+ *    Lighting with Visibility Bitmask », 2023). Par tranche (plan contenant la direction de vue),
-+ *    on marche dans la profondeur ; chaque point touché masque un intervalle d'angles [avant,
-+ *    arrière] (épaisseur supposée), et les secteurs nouvellement masqués reçoivent sa radiance
-+ *    (frame précédente : plusieurs rebonds avec le temps). Secteurs répartis à mesure égale de
-+ *    cos θ dω (intégrale de GTAO), donc la moyenne est la radiance incidente pondérée en cosinus.
-+ * 2. krcSsgiTemporal : accumulation avec reprojection (caméra) et rejet par la profondeur.
-+ * 3. krcSsgiFilter : à-trous arrêté aux arêtes (profondeur, normale), pas 1, 2, 4.
-+ * 4. krcSsgiComposite : couleur + albédo × indirect ; garde la radiance et la profondeur.
++ * 1. krcSsgiTrace: visibility bitmask (Therrien, Levesque, Gilet, "Screen Space Indirect
++ *    Lighting with Visibility Bitmask", 2023). Per slice (plane containing the view direction),
++ *    the depth buffer is marched; each hit point masks an interval of angles [front,
++ *    back] (assumed thickness), and the newly masked sectors receive its radiance
++ *    (previous frame: several bounces over time). Sectors spread at equal measure of
++ *    cos θ dω (GTAO integral), so the mean is the cosine-weighted incident radiance.
++ * 2. krcSsgiTemporal: accumulation with reprojection (camera) and depth rejection.
++ * 3. krcSsgiFilter: à-trous stopped at edges (depth, normal), steps 1, 2, 4.
++ * 4. krcSsgiComposite: colour + albedo × indirect; keeps the radiance and the depth.
 + */
 +
 +#include "../GlobalCb.h"
@@ -352,19 +349,19 @@ index 0000000..fea78e8
 +
 +struct KrcSsgiConstants
 +{
-+    float radius;        // rayon de recherche (unités du monde)
-+    float thickness;     // épaisseur supposée des surfaces (unités du monde)
++    float radius;        // search radius (world units)
++    float thickness;     // assumed thickness of the surfaces (world units)
 +    float intensity;
 +    float maxRadiusPixels;
 +
 +    int slices;
-+    int steps;           // pas par côté
++    int steps;           // steps per side
 +    int frame;
-+    int gbufferNormals;  // 1 : normales du G-buffer ; 0 : déduites de la profondeur (ReShade)
++    int gbufferNormals;  // 1: G-buffer normals; 0: derived from depth (ReShade)
 +
-+    int gbufferAlbedo;   // 1 : albédo du G-buffer ; 0 : estimé à partir de la couleur (ReShade)
++    int gbufferAlbedo;   // 1: G-buffer albedo; 0: estimated from the colour (ReShade)
 +    int historyMax;
-+    int filterStep;      // pas de la passe à-trous en cours
++    int filterStep;      // step of the current à-trous pass
 +    int debug;
 +};
 +
@@ -372,14 +369,14 @@ index 0000000..fea78e8
 +ConstantBuffer<GlobalConstants>     g_Global        : register(b1);
 +ConstantBuffer<KrcSsgiConstants>    g_Ssgi          : register(b2);
 +
-+RWTexture2D<float4> u_Color         : register(u0); // couleur du « jeu » (HDR linéaire)
-+RWTexture2D<float>  u_Depth         : register(u1); // z en espace vue (0 : ciel)
-+RWTexture2D<float4> u_NormalRough   : register(u2); // normale du monde (G-buffer)
-+RWTexture2D<float4> u_Albedo        : register(u3); // albédo diffus (G-buffer)
-+RWTexture2D<float4> u_GiRaw         : register(u4); // radiance incidente moyenne de la frame
-+RWTexture2D<float4> u_HistoryPrev   : register(u5); // xyz radiance incidente, w nombre de frames
++RWTexture2D<float4> u_Color         : register(u0); // "game" colour (linear HDR)
++RWTexture2D<float>  u_Depth         : register(u1); // view-space z (0: sky)
++RWTexture2D<float4> u_NormalRough   : register(u2); // world normal (G-buffer)
++RWTexture2D<float4> u_Albedo        : register(u3); // diffuse albedo (G-buffer)
++RWTexture2D<float4> u_GiRaw         : register(u4); // mean incident radiance of the frame
++RWTexture2D<float4> u_HistoryPrev   : register(u5); // xyz incident radiance, w number of frames
 +RWTexture2D<float4> u_HistoryCur    : register(u6);
-+RWTexture2D<float4> u_PrevRadiance  : register(u7); // sortie de la frame précédente
++RWTexture2D<float4> u_PrevRadiance  : register(u7); // output of the previous frame
 +RWTexture2D<float>  u_PrevDepth     : register(u8);
 +RWTexture2D<float4> u_Output        : register(u9);
 +RWTexture2D<float4> u_FilterIn      : register(u10);
@@ -395,7 +392,7 @@ index 0000000..fea78e8
 +    return all(p >= 0) && all(p < int2(ScreenSize()));
 +}
 +
-+// position en espace vue d'un pixel de profondeur z
++// view-space position of a pixel of depth z
 +float3 ViewPosition(float2 pixel, float z)
 +{
 +    const float2 clip = (pixel * g_Lighting.view.windowToClipScale) + g_Lighting.view.windowToClipBias;
@@ -409,7 +406,7 @@ index 0000000..fea78e8
 +    if (g_Ssgi.gbufferNormals != 0)
 +        return normalize(mul(float4(u_NormalRough[p].xyz, 0.0f), g_Lighting.view.matWorldToView).xyz);
 +
-+    // déduite de la profondeur : la plus petite des différences de chaque côté (arêtes nettes)
++    // derived from depth: the smaller of the differences on each side (sharp edges)
 +    const float zl = u_Depth[p + int2(-1, 0)], zr = u_Depth[p + int2(1, 0)];
 +    const float zu = u_Depth[p + int2(0, -1)], zd = u_Depth[p + int2(0, 1)];
 +    const float3 Pl = ViewPosition(float2(p) + float2(-0.5f, 0.5f), zl), Pr = ViewPosition(float2(p) + float2(1.5f, 0.5f), zr);
@@ -428,7 +425,7 @@ index 0000000..fea78e8
 +    return float3(clip.xy / clip.w * g_Lighting.view.clipToWindowScale + g_Lighting.view.clipToWindowBias, clip.w);
 +}
 +
-+// radiance d'un point vu : sortie de la frame précédente reprojetée, à défaut la couleur actuelle
++// radiance of a seen point: previous frame's output reprojected, failing that the current colour
 +float3 SampleRadiance(int2 q, float3 Pq)
 +{
 +    const float3 world = mul(float4(Pq, 1.0f), g_Lighting.view.matViewToWorld).xyz;
@@ -445,7 +442,7 @@ index 0000000..fea78e8
 +    return u_Color[q].rgb;
 +}
 +
-+// ∫ cos(x − n) |sin x| dx de n − π/2 à t (mesure de GTAO dans la tranche)
++// ∫ cos(x − n) |sin x| dx from n − π/2 to t (GTAO measure in the slice)
 +float SliceMeasure(float t, float n)
 +{
 +    const float sn = sin(n);
@@ -469,7 +466,7 @@ index 0000000..fea78e8
 +
 +float InterleavedNoise(uint2 p, uint frame)
 +{
-+    // bruit à faible discrépance (Jimenez), décalé à chaque frame
++    // low-discrepancy noise (Jimenez), shifted every frame
 +    const float2 q = float2(p) + 5.588238f * float(frame & 63u);
 +    return frac(52.9829189f * frac(dot(q, float2(0.06711056f, 0.00583715f))));
 +}
@@ -492,7 +489,7 @@ index 0000000..fea78e8
 +
 +    const float projScale = abs(g_Lighting.view.matViewToClipNoOffset[1][1]) * 0.5f * float(ScreenSize().y);
 +    const float radiusPixels = min(g_Ssgi.radius * projScale / z, g_Ssgi.maxRadiusPixels);
-+    const float marchPixels = max(radiusPixels, g_Ssgi.maxRadiusPixels); // plus loin pour le ciel
++    const float marchPixels = max(radiusPixels, g_Ssgi.maxRadiusPixels); // further for the sky
 +    const float noiseSlice = InterleavedNoise(p, uint(g_Ssgi.frame));
 +    const float noiseStep = InterleavedNoise(p.yx + 17u, uint(g_Ssgi.frame) * 7u + 3u);
 +
@@ -503,7 +500,7 @@ index 0000000..fea78e8
 +        const float phi = (float(s) + noiseSlice) / float(g_Ssgi.slices) * KRC_PI;
 +        const float2 dir = float2(cos(phi), sin(phi));
 +
-+        // axes de la tranche : x (direction de l'écran en espace vue, orthogonale à V) et V
++        // slice axes: x (screen direction in view space, orthogonal to V) and V
 +        float3 x = float3(dir.x, -dir.y, 0.0f);
 +        x = normalize(x - V * dot(x, V));
 +        const float3 axis = cross(x, V);
@@ -532,9 +529,9 @@ index 0000000..fea78e8
 +                const float zq = u_Depth[q];
 +                if (zq <= 0.0f)
 +                {
-+                    // ciel vu à l'écran : les rayons de la caméra le long de la tranche sont dans son
-+                    // plan, et à l'infini la direction depuis le pixel est celle de la caméra ; les
-+                    // pixels de ciel successifs couvrent l'intervalle d'angles entre eux
++                    // sky seen on screen: the camera rays along the slice lie in its
++                    // plane, and at infinity the direction from the pixel is the camera's; the
++                    // successive sky pixels cover the interval of angles between them
 +                    const float3 D = normalize(ViewPosition(float2(q) + 0.5f, 1.0f));
 +                    const float u = SliceMeasure(clamp(atan2(dot(D, x), dot(D, V)), t0, t1), n) / total;
 +                    skyBits |= prevSkyU >= 0.0f ? SectorMask(min(u, prevSkyU), max(u, prevSkyU)) : SectorMask(u - 1.0f / 64.0f, u + 1.0f / 64.0f);
@@ -558,7 +555,7 @@ index 0000000..fea78e8
 +                const uint fresh = mask & ~occluded;
 +                if (fresh != 0u)
 +                {
-+                    // le point touché n'éclaire que s'il fait face au pixel
++                    // the hit point only lights if it faces the pixel
 +                    const float3 Nq = ViewNormal(q, Pq);
 +                    const float facing = saturate(dot(Nq, -d / dist) * 4.0f);
 +                    sliceGi += (float(countbits(fresh)) / 32.0f) * facing * SampleRadiance(q, Pq);
@@ -648,7 +645,7 @@ index 0000000..fea78e8
 +    u_FilterOut[p] = float4(sumW > 0.0f ? sum / sumW : u_FilterIn[p].xyz, u_FilterIn[p].w);
 +}
 +
-+// albédo : G-buffer, ou estimé à partir de la couleur (ReShade) : teinte de la couleur, clarté fixe
++// albedo: G-buffer, or estimated from the colour (ReShade): tint of the colour, fixed brightness
 +float3 Albedo(int2 p)
 +{
 +    if (g_Ssgi.gbufferAlbedo != 0)
@@ -695,7 +692,7 @@ index b2c8fb3..9bdd315 100644
          int bounce;
          for (bounce = 0; true/* break from the middle */; bounce++)
          {
-+            // branche krc : « jeu » sans éclairage indirect (labo de KRC-SSGI) ; le G-buffer est écrit
++            // krc branch: "game" without indirect lighting (KRC-SSGI lab); the G-buffer is written
 +            if (g_Lighting.krcDirectOnly != 0 && bounce >= 1)
 +                break;
              uint rayFlags = RAY_FLAG_NONE;

@@ -1,27 +1,25 @@
 From e6201693aa621aeb8c634fc21fbedbe23d855acc Mon Sep 17 00:00:00 2001
 From: Skynizz <182822215+Skynizz@users.noreply.github.com>
 Date: Fri, 23 Oct 2026 01:06:41 +0200
-Subject: [PATCH 4/6] =?UTF-8?q?KRC=20:=20d=C3=A9bruiteur=20int=C3=A9gr?=
- =?UTF-8?q?=C3=A9,=20test=20de=20coupure=20de=20lumi=C3=A8re,=20co=C3=BBt?=
- =?UTF-8?q?=20divis=C3=A9?=
+Subject: [PATCH 4/6] KRC: built-in denoiser, light cut test, cost divided
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
 
-- pt_krc_denoise : l'indirect est reconstruit par KRC (interpolation des 4
-  cellules voisines sur la face, pondérée par leur confiance) ; le débruiteur
-  du jeu ne le réaccumule plus et ne le filtre plus (il gardait le retard que
-  les chemins corrélés venaient d'enlever).
-- Coût : une insertion par pixel, marquage des cellules sans atomiques
-  contendues, réduction par sous-groupe, éviction plus légère, et liste de
-  tâches compacte pour les chemins (passe dense) : 1,48 → 0,54 ms à
-  0,1 chemin/px (≈ SHaRC).
-- pt_test_light_scale : coupure de toutes les lampes, avec l'intensité
-  précédente suivie dans prev_style_scale (test de réaction).
-- profiler_dump : moyennes des passes dans la console ; marqueurs KRC.
-- Dépendances : en-têtes du cache suivis par les shaders ; recompilation du
-  C quand un en-tête partagé change (Ninja ne lit pas /showIncludes en
-  français).
+- pt_krc_denoise: the indirect is reconstructed by KRC (interpolation of the 4
+  neighbouring cells on the face, weighted by their confidence); the game's
+  denoiser no longer re-accumulates or filters it (it kept the lag that
+  the correlated paths had just removed).
+- Cost: one insertion per pixel, cell marking without contended
+  atomics, subgroup reduction, lighter eviction, and a compact task
+  list for the paths (dense pass): 1.48 → 0.54 ms at
+  0.1 path/px (≈ SHaRC).
+- pt_test_light_scale: cuts every lamp, with the previous intensity
+  tracked in prev_style_scale (response test).
+- profiler_dump: pass means in the console; KRC markers.
+- Dependencies: cache headers tracked by the shaders; the C code is rebuilt
+  when a shared header changes (Ninja does not read /showIncludes in
+  French).
 
 ---
  build_krc.bat                                 |  6 +-
@@ -45,13 +43,13 @@ index bba2d390..7823f574 100644
 +++ b/build_krc.bat
 @@ -1,12 +1,14 @@
  @echo off
- rem Compilation de Quake II RTX (branche krc) : MSVC x64, CMake + Ninja de Visual Studio.
--rem Compilateur en anglais : Ninja ne lit les dependances aux en-tetes que dans ce format.
+ rem Build of Quake II RTX (krc branch): MSVC x64, CMake + Ninja from Visual Studio.
+-rem English compiler: Ninja only reads header dependencies in that format.
 -set VSLANG=1033
  call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat" >nul || exit /b 1
  cd /d %~dp0
-+rem Ninja ne suit pas les en-tetes avec le compilateur en francais (separateur non ASCII dans
-+rem /showIncludes) : si un en-tete partage avec le C a change, on recompile le C du moteur.
++rem Ninja does not follow headers with the French compiler (non-ASCII separator in
++rem /showIncludes): if a header shared with the C code changed, the engine C code is rebuilt.
 +powershell -NoProfile -Command "$s='build\headers.stamp'; $h=Get-ChildItem src\refresh\vkpt\vkpt.h,src\refresh\vkpt\shader\global_ubo.h,src\refresh\vkpt\shader\vertex_buffer.h | Sort-Object LastWriteTime | Select-Object -Last 1; if ((Test-Path $s) -and ($h.LastWriteTime -gt (Get-Item $s).LastWriteTime)) { Get-ChildItem src\refresh\vkpt\*.c | ForEach-Object { $_.LastWriteTime = Get-Date } }"
  if not exist build mkdir build
  cd build
@@ -74,7 +72,7 @@ index 110ed808..15ddb9c8 100644
  VkResult
  vkpt_asvgf_filter(VkCommandBuffer cmd_buf, bool enable_lf)
  {
-+	// KRC avec débruiteur intégré : l'indirect (LF) n'est pas filtré ici
++	// KRC with built-in denoiser: the indirect (LF) is not filtered here
 +	if ((int)cvar_pt_cache->value == 2 && cvar_pt_krc_denoise->value != 0)
 +		enable_lf = false;
 +
@@ -88,7 +86,7 @@ index f710f0e5..1d93c3f5 100644
 @@ -71,7 +71,7 @@ typedef enum {
      PIPELINE_INDIRECT_LIGHTING_FIRST,
      PIPELINE_INDIRECT_LIGHTING_SECOND,
- 	PIPELINE_CACHE_FIRST,       // caches de radiance : une passe par valeur de spec_pass
+ 	PIPELINE_CACHE_FIRST,       // radiance caches: one pass per spec_pass value
 -	PIPELINE_CACHE_LAST = PIPELINE_CACHE_FIRST + 6,
 +	PIPELINE_CACHE_LAST = PIPELINE_CACHE_FIRST + 7,
  
@@ -96,11 +94,11 @@ index f710f0e5..1d93c3f5 100644
  } pipeline_index_t;
 @@ -1166,10 +1166,18 @@ trace_radiance_cache(VkCommandBuffer cmd_buf)
  		uint32_t n = vkpt_rc_krc_cells();
- 		int passes = (int)cvar_pt_krc_passes->value; // débogage : passes actives (bits)
+ 		int passes = (int)cvar_pt_krc_passes->value; // debugging: active passes (bits)
  		if (passes & 1) { dispatch_rays(cmd_buf, PIPELINE_CACHE_FIRST + 2, push, 1, 1, 1); cache_barrier(cmd_buf); }
 +		BEGIN_PERF_MARKER(cmd_buf, PROFILER_KRC_PIXELS);
  		if (passes & 2) { dispatch_rays(cmd_buf, PIPELINE_CACHE_FIRST + 3, push, qvk.extent_render.width, qvk.extent_render.height, 1); cache_barrier(cmd_buf); }
-+		// chemins : une grille de la taille de l'image, chaque fil prend une tâche (les fils sans tâche sortent)
++		// paths: a grid the size of the image, each thread takes a task (threads without a task exit)
 +		if (passes & 2) { dispatch_rays(cmd_buf, PIPELINE_CACHE_FIRST + 7, push, qvk.extent_render.width, qvk.extent_render.height, 1); cache_barrier(cmd_buf); }
 +		END_PERF_MARKER(cmd_buf, PROFILER_KRC_PIXELS);
  		if (passes & 4) { dispatch_rays(cmd_buf, PIPELINE_CACHE_FIRST + 4, push, 1, 1, 1); cache_barrier(cmd_buf); }
@@ -117,7 +115,7 @@ index f710f0e5..1d93c3f5 100644
 @@ -1302,9 +1310,9 @@ vkpt_pt_create_pipelines()
  	};
  
- 	// passes des caches de radiance : spec_pass = 0..6
+ 	// passes of the radiance caches: spec_pass = 0..6
 -	uint32_t cache_numbers[7] = { 0, 1, 2, 3, 4, 5, 6 };
 -	VkSpecializationInfo cache_spec_info[7];
 -	for (int i = 0; i < 7; i++)
@@ -160,7 +158,7 @@ index 141c3155..440e492c 100644
  }
  
  // Change size of profiler samples circular buffer
-+// moyennes sur une période, écrites dans la console par « profiler_dump » (mesures en timedemo)
++// means over a period, written to the console by "profiler_dump" (timedemo measurements)
 +static uint64_t dump_sum[NUM_PROFILER_ENTRIES];
 +static uint64_t dump_count[NUM_PROFILER_ENTRIES];
 +
@@ -197,7 +195,7 @@ index 85c9dedf..fc69d82c 100644
 --- a/src/refresh/vkpt/radiance_cache.c
 +++ b/src/refresh/vkpt/radiance_cache.c
 @@ -38,7 +38,7 @@ static BufferResource_t buf_sharc_accum;    // accumulation de la frame, 16 octe
- static BufferResource_t buf_sharc_resolved; // données résolues, 16 octets
+ static BufferResource_t buf_sharc_resolved; // resolved data, 16 bytes
  
  static BufferResource_t buf_krc_keys, buf_krc_vals, buf_krc_cells, buf_krc_acc, buf_krc_ctr,
 -	buf_krc_vis, buf_krc_free, buf_krc_pix;
@@ -230,7 +228,7 @@ index 85c9dedf..fc69d82c 100644
 +	ubo->rc_addr_g[3] = 0;
  	memcpy(cam_pos_prev, ubo->cam_pos, sizeof(cam_pos_prev));
  
- 	// changer de méthode : on repart d'un cache vide, pour une comparaison juste
+ 	// switching method: start again from an empty cache, for a fair comparison
 diff --git a/src/refresh/vkpt/shader/asvgf_temporal.comp b/src/refresh/vkpt/shader/asvgf_temporal.comp
 index f3a4cd61..4afd90f0 100644
 --- a/src/refresh/vkpt/shader/asvgf_temporal.comp
@@ -240,8 +238,8 @@ index f3a4cd61..4afd90f0 100644
  		// Adjust the blending factors, taking the antilag factors into account again
  		alpha_color_lf = mix(alpha_color_lf, 1.0, antilag_alpha_lf);
 +
-+		// KRC avec débruiteur intégré : l'indirect est déjà reconstruit et à jour (cellules),
-+		// le réaccumuler ici ne ferait qu'ajouter du retard
++		// KRC with built-in denoiser: the indirect is already reconstructed and up to date (cells),
++		// accumulating it again here would only add lag
 +		if (global_ubo.pt_cache == 2 && global_ubo.pt_krc_denoise != 0)
 +			alpha_color_lf = 1.0;
  		alpha_color_hf = mix(alpha_color_hf, 1.0, antilag_alpha_hf);
@@ -252,19 +250,19 @@ index 974df814..3d4923d6 100644
 --- a/src/refresh/vkpt/shader/global_ubo.h
 +++ b/src/refresh/vkpt/shader/global_ubo.h
 @@ -48,6 +48,8 @@ with this program; if not, write to the Free Software Foundation, Inc.,
- 	UBO_CVAR_DO(pt_krc_hist, 256) /* KRC : historique maximal d'une cellule (échantillons) */ \
- 	UBO_CVAR_DO(pt_krc_delta, 1) /* KRC : chemins corrélés (lumière d'avant / d'après des lampes animées) */ \
- 	UBO_CVAR_DO(pt_krc_detect, 1) /* KRC : détection de changement non expliqué (porte, objet) */ \
-+	UBO_CVAR_DO(pt_krc_denoise, 1) /* KRC : débruiteur intégré (l'indirect est reconstruit par KRC, sans historique ni filtre du débruiteur) */ \
-+	UBO_CVAR_DO(pt_test_light_scale, 1) /* test des caches : intensité de toutes les lampes (coupure de courant) */ \
- 	UBO_CVAR_DO(pt_krc_passes, 31) /* KRC, débogage : passes actives (bits : compteurs, pixels, liste libre, éviction, résolution) */ \
+ 	UBO_CVAR_DO(pt_krc_hist, 256) /* KRC: maximum history of a cell (samples) */ \
+ 	UBO_CVAR_DO(pt_krc_delta, 1) /* KRC: correlated paths (light before / after of animated lamps) */ \
+ 	UBO_CVAR_DO(pt_krc_detect, 1) /* KRC: detection of unexplained changes (door, object) */ \
++	UBO_CVAR_DO(pt_krc_denoise, 1) /* KRC: built-in denoiser (the indirect is reconstructed by KRC, without the denoiser's history or filter) */ \
++	UBO_CVAR_DO(pt_test_light_scale, 1) /* cache test: intensity of every lamp (power cut) */ \
+ 	UBO_CVAR_DO(pt_krc_passes, 31) /* KRC, debugging: active passes (bits: counters, pixels, free list, eviction, resolve) */ \
  	UBO_CVAR_DO(flt_antilag_hf, 1) /* A-SVGF anti-lag filter strength, [0..inf) */ \
  	UBO_CVAR_DO(flt_antilag_lf, 0.2) \
 @@ -243,6 +245,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
- 	GLOBAL_UBO_VAR_LIST_DO(uvec4,           rc_addr_e) /* KRC : compteurs (xy), cellules visibles (zw) */ \
- 	GLOBAL_UBO_VAR_LIST_DO(uvec4,           rc_addr_f) /* KRC : liste libre (xy), cellules des pixels (zw) */ \
- 	GLOBAL_UBO_VAR_LIST_DO(uvec4,           rc_krc) /* KRC : masque de la table, capacité, pixels max, - */ \
-+	GLOBAL_UBO_VAR_LIST_DO(uvec4,           rc_addr_g) /* KRC : tâches (xy) : (pixel, cellule) des chemins de la frame */ \
+ 	GLOBAL_UBO_VAR_LIST_DO(uvec4,           rc_addr_e) /* KRC: counters (xy), visible cells (zw) */ \
+ 	GLOBAL_UBO_VAR_LIST_DO(uvec4,           rc_addr_f) /* KRC: free list (xy), pixel cells (zw) */ \
+ 	GLOBAL_UBO_VAR_LIST_DO(uvec4,           rc_krc) /* KRC: table mask, capacity, max pixels, - */ \
++	GLOBAL_UBO_VAR_LIST_DO(uvec4,           rc_addr_g) /* KRC: tasks (xy): (pixel, cell) of the frame's paths */ \
  	\
  	GLOBAL_UBO_VAR_LIST_DO(DynLightData,    dyn_light_data[MAX_LIGHT_SOURCES]) \
  	GLOBAL_UBO_VAR_LIST_DO(vec4,            cam_pos) \
@@ -293,7 +291,7 @@ index 551b3808..78459e7b 100644
  #define KRC_C_PIX_PREV  7
  #define KRC_C_CLOCK     8
  #define KRC_C_OVERFLOW  9
-+#define KRC_C_TASKS     10  // chemins à tracer dans la frame
++#define KRC_C_TASKS     10  // paths to trace in the frame
  
  KrcU32 krc_keys()  { return KrcU32(rc_address(global_ubo.rc_addr_c.xy)); }
  KrcU32 krc_vals()  { return KrcU32(rc_address(global_ubo.rc_addr_c.zw)); }
@@ -309,10 +307,10 @@ index 551b3808..78459e7b 100644
  	return 2.0 / (abs(global_ubo.P[1][1]) * float(global_ubo.height));
  }
  
--// clé de la cellule du point p (normale n, à la distance dist de la caméra), décalée de
--// jitter (en fractions de cellule)
+-// key of the cell of point p (normal n, at distance dist from the camera), offset by
+-// jitter (in fractions of a cell)
 -uint krc_key(vec3 p, vec3 n, float dist, vec3 jitter, out float size)
-+// niveau (taille en puissance de 2) et face (axe dominant de la normale, signe) d'un point
++// level (power-of-2 size) and face (dominant axis of the normal, sign) of a point
 +int krc_level(float dist, out float size)
  {
  	float target = global_ubo.pt_krc_cell_px * max(dist, 1.0) * krc_pixel_angle();
@@ -345,9 +343,9 @@ index 551b3808..78459e7b 100644
  	return h;
  }
  
-+// clé de la cellule du point p (normale n, à la distance dist de la caméra), décalée de
-+// jitter (en fractions de cellule) dans le plan de la face seulement : le long de la normale,
-+// la cellule est toujours celle du point, ce qui permet la reconstruction bilinéaire
++// key of the cell of point p (normal n, at distance dist from the camera), offset by
++// jitter (in fractions of a cell) in the plane of the face only: along the normal,
++// the cell is always the point's own, which allows bilinear reconstruction
 +uint krc_key(vec3 p, vec3 n, float dist, vec3 jitter, out float size)
 +{
 +	int level = krc_level(dist, size);
@@ -357,18 +355,18 @@ index 551b3808..78459e7b 100644
 +	return krc_key_q(q, level, krc_face(n, axis));
 +}
 +
- // cellule existante pour la clé, ou KRC_NONE
+ // existing cell for the key, or KRC_NONE
  uint krc_find(uint key)
  {
 @@ -180,6 +205,52 @@ uint krc_find(uint key)
  	return KRC_NONE;
  }
  
-+// Débruiteur intégré (pt_krc_denoise) : indirect d'un point reconstruit à partir des 4
-+// cellules voisines dans le plan de sa face (interpolation bilinéaire), chacune pondérée par sa
-+// confiance (échantillons accumulés). Déterministe : pas de bruit d'un pixel ou d'une frame à
-+// l'autre, donc rien à accumuler ni à filtrer ensuite ; la mise à jour dans le temps est celle
-+// des cellules (chemins corrélés), sans retard ajouté.
++// Built-in denoiser (pt_krc_denoise): indirect of a point reconstructed from the 4
++// neighbouring cells in the plane of its face (bilinear interpolation), each weighted by its
++// confidence (accumulated samples). Deterministic: no noise from one pixel or frame to
++// the next, so nothing to accumulate or filter afterwards; the update over time is that
++// of the cells (correlated paths), with no added lag.
 +bool krc_smooth_indirect(vec3 p, vec3 n, out vec3 value)
 +{
 +	value = vec3(0);
@@ -410,8 +408,8 @@ index 551b3808..78459e7b 100644
 +	return true;
 +}
 +
- // indirect diffus d'un pixel (canal LF) : moyenne tronquée de ses K cellules (sans la plus
- // claire ni la plus sombre quand il y en a 4) ; false si aucune cellule n'a d'échantillon
+ // diffuse indirect of a pixel (LF channel): truncated mean of its K cells (without the
+ // brightest or the darkest when there are 4); false if no cell has a sample
  bool krc_pixel_indirect(ivec2 ipos, out vec3 value)
 diff --git a/src/refresh/vkpt/shader/radiance_cache.rgen b/src/refresh/vkpt/shader/radiance_cache.rgen
 index d320ae20..2f8ae548 100644
@@ -429,8 +427,8 @@ index d320ae20..2f8ae548 100644
  	float dist = length(s.position - global_ubo.cam_pos.xyz);
  	KrcU64 acc = krc_acc();
  	KrcU64 ctr = krc_ctr();
-+	// avec le débruiteur intégré, l'affichage lit les cellules voisines lui-même : une seule
-+	// cellule (décalée au hasard) par pixel et par frame suffit à les créer et à les nourrir
++	// with the built-in denoiser, the display reads the neighbouring cells itself: a single
++	// cell (randomly offset) per pixel per frame is enough to create and feed them
 +	uint inserts = (global_ubo.pt_krc_denoise != 0) ? 1u : KRC_K;
  	uint my_cells[KRC_K];
  	for (uint k = 0u; k < KRC_K; k++)
@@ -444,8 +442,8 @@ index d320ae20..2f8ae548 100644
 +			float size;
 +			uint key = krc_key(s.position, s.normal, dist, vec3(rc_rand(), rc_rand(), rc_rand()) - 0.5, size);
 +			c = krc_insert(key);
-+			// cellule utilisée dans la frame : marquée une fois (lecture d'abord, pour éviter des
-+			// centaines d'atomiques sur la même cellule)
++			// cell used in the frame: marked once (read first, to avoid hundreds
++			// of atomics on the same cell)
 +			uint fa = c * KRC_ACC + KRC_A_FOOT;
 +			if (c != KRC_NONE && acc.v[fa] == 0 && atomicCompSwap(acc.v[fa], uint64_t(0), uint64_t(1)) == 0)
 +				krc_vis().v[uint(atomicAdd(ctr.v[KRC_C_NVIS], uint64_t(1)))] = c;
@@ -465,7 +463,7 @@ index d320ae20..2f8ae548 100644
  	float sigma = krc_sigma(c, sigma_mean);
 -	atomicAdd(ctr.v[KRC_C_SIG], uint64_t(sigma * KRC_FX));
 -	atomicAdd(ctr.v[KRC_C_PIX], uint64_t(1));
-+	// somme des sigma : réduite dans le sous-groupe, un seul atomique par sous-groupe
++	// sum of the sigmas: reduced within the subgroup, a single atomic per subgroup
 +	uint sig_sum = subgroupAdd(uint(min(sigma, 1000.0) * 1024.0));
 +	uint pix_sum = subgroupAdd(1u);
 +	if (subgroupElect())
@@ -477,8 +475,8 @@ index d320ae20..2f8ae548 100644
 -	int paths = int(floor(min(p, 4.0) + rc_rand()));
 +	uint paths = uint(floor(min(p, 4.0) + rc_rand()));
 +
-+	// tâches de la frame : (pixel, cellule), tracées ensuite par une passe dense (krc_trace) ;
-+	// tracer ici laisserait trois fils sur quatre du warp attendre le quatrième
++	// tasks of the frame: (pixel, cell), traced afterwards by a dense pass (krc_trace);
++	// tracing here would leave three threads out of four in the warp waiting for the fourth
 +	uint offset = subgroupExclusiveAdd(paths);
 +	uint total = subgroupAdd(paths);
 +	uint base = 0u;
@@ -496,7 +494,7 @@ index d320ae20..2f8ae548 100644
 +	}
 +}
  
-+// passe 7 : les chemins de la frame, un fil par tâche
++// pass 7: the frame's paths, one thread per task
 +void krc_trace(uint id)
 +{
 +	KrcU64 ctr = krc_ctr();
@@ -521,8 +519,8 @@ index d320ae20..2f8ae548 100644
  	ctr.v[KRC_C_POP] = 0;
  }
  
--// passe 5 : éviction des cellules inutilisées depuis 120 frames (1/8 des cellules par frame)
-+// passe 5 : éviction des cellules inutilisées depuis 120 frames (1/32 des cellules par frame)
+-// pass 5: eviction of cells unused for 120 frames (1/8 of the cells per frame)
++// pass 5: eviction of cells unused for 120 frames (1/32 of the cells per frame)
  void krc_evict(uint id)
  {
  	KrcU64 ctr = krc_ctr();
@@ -557,7 +555,7 @@ diff --git a/src/refresh/vkpt/shader/radiance_cache_ext.h b/src/refresh/vkpt/sha
 index cfbddf0b..9c8fa1fb 100644
 --- a/src/refresh/vkpt/shader/radiance_cache_ext.h
 +++ b/src/refresh/vkpt/shader/radiance_cache_ext.h
-@@ -11,5 +11,6 @@ Licence GPL v2 ou ultérieure (voir license.txt).
+@@ -11,5 +11,6 @@ GPL v2 licence or later (see license.txt).
  #extension GL_EXT_shader_explicit_arithmetic_types_float16 : require
  #extension GL_EXT_shader_atomic_int64 : require
  #extension GL_KHR_shader_subgroup_ballot : require
@@ -572,8 +570,8 @@ index d91a2cf4..b0f6b9f9 100644
  #endif
  }
  
-+// Test des caches (pt_test_light_scale) : facteur appliqué à toutes les lampes, comme une
-+// coupure de courant ; la valeur de la frame précédente suit dans prev_style_scale.
++// Cache test (pt_test_light_scale): factor applied to every lamp, like a
++// power cut; the previous frame's value follows in prev_style_scale.
 +extern cvar_t *cvar_pt_test_light_scale;
 +static float test_light_scale = 1.f;
 +static float test_light_scale_prev = 1.f;
