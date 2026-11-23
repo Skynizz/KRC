@@ -408,7 +408,7 @@ pub fn run(
             Kind::Gpu { .. } => unreachable!(),
             Kind::Cache { neyman, ema, on_event, safety, age } => {
                 let window = if age { Some(DEP_WINDOW) } else { None };
-                // 1. cellules visibles
+                // 1. visible cells
                 let mut pix_cells = vec![[u32::MAX; K]; world.len()];
                 for &k in &surf {
                     let Px::Surf { p, n, dist, .. } = gb[k] else { unreachable!() };
@@ -633,7 +633,7 @@ pub fn run(
                             budget - pay
                         }
                     };
-                    // plancher d'exploration
+                    // exploration floor
                     for &c in &visible {
                         if t as i64 - cache.cells[c].last >= EXPLORE_PERIOD && cache.cells[c].main.n > 0.0 {
                             tasks.push(pick(c, &mut rng));

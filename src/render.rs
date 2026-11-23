@@ -31,7 +31,7 @@ impl World {
         let cx = 2.6 * self.rooms as f64 - 0.05;
         (v3(cx, 1.7, 4.0 + 3.25 * self.rooms as f64), v3(cx, 1.2, 2.0))
     }
-    /// Largeur angulaire d'un pixel (empreinte = distance × px_angle).
+    /// Angular width of a pixel (footprint = distance × px_angle).
     pub fn px_angle(&self) -> f64 {
         2.0 * (HFOV_DEG.to_radians() * 0.5).tan() / self.w as f64
     }

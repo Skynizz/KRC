@@ -375,7 +375,7 @@ lighting changes. Next hypothesis: a standard SHaRC for the steady state, and KR
 
 ## 13. KRC v2 against the real SHaRC
 
-After §12, KRC was refined with short tests (`krc duel`, `krc statique`; 480×270 or 256², 3 seeds, error then GPU time
+After §12, KRC was refined with short tests (`krc duel`, `krc static`; 480×270 or 256², 3 seeds, error then GPU time
 without readback). Changes kept (KRC v2, default):
 
 | Change | Origin | Effect |
@@ -402,7 +402,7 @@ recording of dependencies.
 | Cornell moving camera, ~0.3 ms | **3.2e-3** | 9.0e-2 | — | 28× |
 | Sponza moving camera 1280×720, ~3 ms | **2.7e-2** (p95 5.0 ms) | 1.2e-1 (3.3 ms) | — | 4.4× |
 
-**Long static** (fixed scene, fixed camera, 300 frames, `krc statique`):
+**Long static** (fixed scene, fixed camera, 300 frames, `krc static`):
 
 | | relMSE* f29 | f299 | ms/frame converged |
 |---|---|---|---|
@@ -428,7 +428,7 @@ Reading:
 ## 14. "Game-like" test: final image and denoiser
 
 In a game, the cache is not displayed: each pixel computes its direct lighting, the cache provides the indirect, then a
-denoiser runs. Identical pipeline for both methods (`krc jeu [scene]`, `src/game.wgsl`, 3 seeds):
+denoiser runs. Identical pipeline for both methods (`krc game [scene]`, `src/game.wgsl`, 3 seeds):
 
 - **KRC**: per-pixel direct lighting (one direct estimate per frame) + indirect light read from the cells, which now store
   only the indirect;
@@ -499,7 +499,7 @@ Reading:
 
 ## 16. Showcase: the difference to the eye
 
-`cargo run --release -- vitrine 960` (after `sh tools/fetch_sponza.sh`): textured, glossy Sponza (polished, almost mirror
+`cargo run --release -- showcase 960` (after `sh tools/fetch_sponza.sh`): textured, glossy Sponza (polished, almost mirror
 floor, satin stone, metal, a rolling chrome sphere, a golden sphere), a sky above the roof that sets at frame 100, a gallery
 lamp switching on at frame 80, a walking camera. Same game pipeline for both methods, at equal GPU time (~5.5 ms at
 960×540 without readback). Videos: `results/showcase/comparison.mp4` (24 fps) and `comparaison_lente.mp4` (12 fps); stills
@@ -532,7 +532,7 @@ Reading:
 
 ## 17. Showcase after fixes: banners, brightness, mirrors
 
-Same conditions as §16 (`cargo run --release -- vitrine 960`), after the fixes of JOURNAL v17. KRC: 16 px cells, 0.4
+Same conditions as §16 (`cargo run --release -- showcase 960`), after the fixes of JOURNAL v17. KRC: 16 px cells, 0.4
 path/px, 2 direct estimates per pixel; SHaRC: §16's settings. The denoiser, the MIS and the specular clamp are shared.
 
 ![The rolling sphere](../results/showcase/comparison_f060.png)
@@ -562,8 +562,8 @@ Reading:
 - **Events**: KRC 8 dB ahead after the sky sets; SHaRC keeps daylight (luminance 1.5).
 - The mean relMSE* (KRC 7.4e-2, SHaRC 7.2e-2) is dominated by the edges of the sky's reflections in the sphere (f60 to
   f90); see JOURNAL v17.
-- Non-regression (`jeu cornell`, `jeu sponza`, scenes without specular): unchanged, KRC 3.6e-3 against 1.4e-2 (Cornell),
-  1.27e-2 against 2.26e-2 (Sponza). KRC's dark drift after switching off in `jeu sponza` (luminance 0.63 at f110) is still
+- Non-regression (`game cornell`, `game sponza`, scenes without specular): unchanged, KRC 3.6e-3 against 1.4e-2 (Cornell),
+  1.27e-2 against 2.26e-2 (Sponza). KRC's dark drift after switching off in `game sponza` (luminance 0.63 at f110) is still
   to fix.
 
 ## 18. In a real game: Quake II RTX

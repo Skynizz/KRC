@@ -173,7 +173,7 @@ pub struct GMesh {
     pub first_vertex: u32,
     pub first_index: u32,
     pub tex: i32,
-    /// bit 0 : masque alpha
+    /// bit 0: alpha mask
     pub flags: u32,
     pub albedo: [f32; 3],
     pub rough: f32,
@@ -1109,8 +1109,8 @@ pub fn bias(gpu: &Gpu, setup: &TriSetup) {
     let last = at(fs);
     // (name, sharc, variance cap, n_post, history variance, cap of no-difference cells)
     let variants = [
-        ("krc_avant", false, 0.0f32, 64.0f32, false, false),
-        ("+plafond_var", false, 1.0, 64.0, false, false),
+        ("krc_before", false, 0.0f32, 64.0f32, false, false),
+        ("+var_cap", false, 1.0, 64.0, false, false),
         ("+zero_cap", false, 1.0, 64.0, false, true),
         ("krc", false, 1.0, 16.0, true, true),
         ("sharc", true, 0.0, 0.0, false, false),
@@ -1176,7 +1176,7 @@ pub fn sharc_check(gpu: &Gpu, setup: &TriSetup) {
         ("NVIDIA default", d),
         ("every pixel", ShParams { downscale: 1, ..d }),
         ("+ accumulation 1024", ShParams { downscale: 1, accum_frames: 1024, ..d }),
-        ("+ voxels 8× plus fins", ShParams { downscale: 1, accum_frames: 1024, scene_scale: 400.0, ..d }),
+        ("+ voxels 8× finer", ShParams { downscale: 1, accum_frames: 1024, scene_scale: 400.0, ..d }),
     ];
     for (name, sh) in variants {
         let mut k = GpuKrc::with_method(gpu, view, grid, Some(&scene), Method::Sharc, 5);
@@ -1528,7 +1528,7 @@ pub fn game_eval(gpu: &Gpu, setup: &TriSetup, cfgs: &[(DuelCfg, bool)]) {
                     }
                     if seed == 0 && [39u32, 101, 119].contains(&t) {
                         let tag = c.name.replace([' ', '/'], "_");
-                        let suffix = if *denoise { "" } else { "_brut" };
+                        let suffix = if *denoise { "" } else { "_raw" };
                         crate::image::save(&format!("{out_dir}/{tag}{suffix}_f{t:03}.png"), setup.view.w, setup.view.h, &f.image);
                     }
                     last_img = f.image.clone();
@@ -1537,7 +1537,7 @@ pub fn game_eval(gpu: &Gpu, setup: &TriSetup, cfgs: &[(DuelCfg, bool)]) {
         }
         ms.sort_by(|a, b| a.total_cmp(b));
         let mean = ms.iter().sum::<f64>() / ms.len() as f64;
-        let name = format!("{}{}", c.name, if *denoise { "" } else { " (brut)" });
+        let name = format!("{}{}", c.name, if *denoise { "" } else { " (raw)" });
         let line = format!(
             "{name:<30} relMSE* {all:.3e} (static {stat:.2e}, dynamic {dynm:.2e}) | flicker {flick:.3} | lum f101 {:.2} f103 {:.2} f105 {:.2} f110 {:.2} | GPU mean {mean:.2} ms, p95 {:.2} ms",
             lum[0],
@@ -1550,7 +1550,7 @@ pub fn game_eval(gpu: &Gpu, setup: &TriSetup, cfgs: &[(DuelCfg, bool)]) {
         out += &line;
         out += "\n";
     }
-    let path = format!("{out_dir}/resultats.txt");
+    let path = format!("{out_dir}/results.txt");
     let prev = std::fs::read_to_string(&path).unwrap_or_default();
     std::fs::write(path, prev + &out).unwrap();
 }
@@ -1620,9 +1620,9 @@ pub fn sponza_pbr() -> &'static (Vec<Mesh>, Aabb, TexArray) {
                 let floor = area > 0.0 && up > 0.6 * area;
                 let (rough, metal) = match mi {
                     _ if floor => (0.06, 0.0),
-                    14..=19 | 0 | 3 | 24 => (1.0, 0.0), // tissus, feuillages, tuiles : mats
+                    14..=19 | 0 | 3 | 24 => (1.0, 0.0), // fabrics, foliage, tiles: matte
                     20 | 21 => (0.3, 1.0),              // chain, hangers: metal
-                    2 => (0.15, 1.0),                   // poteaux : chrome
+                    2 => (0.15, 1.0),                   // posts: chrome
                     _ => (0.4, 0.0),                    // satin stone
                 };
                 let alpha_mask = matches!(mat.alpha_mode(), gltf::material::AlphaMode::Mask);
@@ -2018,7 +2018,7 @@ pub fn showcase_dbg(gpu: &Gpu, f: u32) {
                     img = fr.image;
                 }
             }
-            let tag = if denoise { "debruite" } else { "brut" };
+            let tag = if denoise { "denoised" } else { "raw" };
             crate::image::write_png(&format!("results/showcase/dbg_f{f:03}_{name}_{tag}.png"), 960, 540, &tonemap(&img, 9.3))
                 .unwrap();
         }
@@ -2054,7 +2054,7 @@ pub fn showcase_lum(gpu: &Gpu) {
         ("sharc raw specular", Method::Sharc, 15 | 64, true, 0.0),
         ("sharc", Method::Sharc, 0, true, 0.0),
         ("sharc without anything", Method::Sharc, 15, true, 0.0),
-        ("sharc brut", Method::Sharc, 15, false, 0.0),
+        ("sharc raw", Method::Sharc, 15, false, 0.0),
     ];
     for (name, method, off, denoise, gamma) in cases {
         let mut k = GpuKrc::with_method(gpu, setup.view, grid, Some(&scene0), method, 1);

@@ -285,7 +285,7 @@ fn radiance(p0: vec3<f32>, n0: vec3<f32>, a0: vec3<f32>, uni: bool) -> LL {
                 }
             }
         }
-        // rebond diffus
+        // diffuse bounce
         let d = cosine_dir(n);
         beta = beta * albedo;
         let h = intersect(origin, d);

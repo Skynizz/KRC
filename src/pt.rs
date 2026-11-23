@@ -120,7 +120,7 @@ pub fn radiance_split<R: Rec>(
                 }
             }
         }
-        // rebond diffus
+        // diffuse bounce
         let d = cosine_dir(n, rng);
         beta = beta.mul(albedo);
         let hit = scene.intersect(origin, d, f64::INFINITY);

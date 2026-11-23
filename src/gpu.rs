@@ -1,4 +1,4 @@
-//! Traceur GPU : compute shader WGSL (trace.wgsl) via wgpu (Vulkan/DX12).
+//! GPU tracer: WGSL compute shader (trace.wgsl) through wgpu (Vulkan/DX12).
 use crate::deps::{Bits, WORDS};
 use crate::math::{mix64, v3, V3};
 use crate::pt::DepRec;
@@ -114,11 +114,11 @@ pub struct Prof {
     pub upload: f64,
     /// submit → end of the GPU work (kernel + copies + synchronisation)
     pub wait: f64,
-    /// noyau seul (timestamps GPU)
+    /// kernel alone (GPU timestamps)
     pub kernel: f64,
     /// read of the mapped buffers
     pub read: f64,
-    /// conversion en structures CPU (V3 f64, DepRec)
+    /// conversion to CPU structures (V3 f64, DepRec)
     pub convert: f64,
 }
 

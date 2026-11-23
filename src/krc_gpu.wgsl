@@ -73,7 +73,7 @@ const ACC: u32 = 52u;
 const A_FOOT: u32 = 0u;
 const A_REF: u32 = 1u;
 const A_FN: u32 = 2u;
-const A_FR: u32 = 3u;        // 3, 4, 5 : Σ rgb
+const A_FR: u32 = 3u;        // 3, 4, 5: Σ rgb
 const A_FL: u32 = 6u;
 const A_FL2: u32 = 7u;
 const A_DEPS: u32 = 8u;      // 8, 9: super-regions crossed (current window)
@@ -82,8 +82,8 @@ const A_FREQ: u32 = 11u;     // 11..28: 36 u16 vertex counters per super-region
 const A_PM: u32 = 29u;
 const A_PDIFF: u32 = 30u;
 const A_PAFF: u32 = 31u;
-const A_PX: u32 = 32u;       // 32, 33, 34 : Σx rgb
-const A_PY: u32 = 35u;       // 35, 36, 37 : Σy rgb
+const A_PX: u32 = 32u;       // 32, 33, 34: Σx rgb
+const A_PY: u32 = 35u;       // 35, 36, 37: Σy rgb
 const A_PXL: u32 = 38u;
 const A_PYL: u32 = 39u;
 const A_PXL2: u32 = 40u;
@@ -199,8 +199,8 @@ struct Cell {
 // event: [0,108) fine regions, [108,110) super-regions, [110,146) magnitude per
 // super-region (f32), [146,162) lamp weights (f32)
 @group(0) @binding(14) var<storage, read> ev: array<u32>;
-@group(0) @binding(15) var<storage, read_write> scal: array<f32>; // 0 : λ, 1 : a priori, 2 : budget, 3-4 : bornes log2 λ
-@group(0) @binding(16) var<storage, read_write> ind: array<u32>; // arguments de dispatch indirect
+@group(0) @binding(15) var<storage, read_write> scal: array<f32>; // 0: λ, 1: prior, 2: budget, 3-4: log2 λ bounds
+@group(0) @binding(16) var<storage, read_write> ind: array<u32>; // indirect dispatch arguments
 // compact summary per cell for allocation: (footprint, n, relative variance, draw)
 @group(0) @binding(17) var<storage, read_write> qbuf: array<vec4<f32>>;
 @group(0) @binding(22) var<storage, read_write> free_list: array<u32>;
@@ -1337,7 +1337,7 @@ fn event_mark(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
 }
 
-// arguments de dispatch indirect : round 0 = delta tour 1, 1 = delta tour 2, 2 = ordinaires
+// indirect dispatch arguments: round 0 = delta round 1, 1 = delta round 2, 2 = ordinary
 fn prep_indirect(round: u32) {
     let cur = atomicLoad(&ctr[C_TASKS]);
     var lo = 0u;
@@ -1656,7 +1656,7 @@ fn alloc_prep() {
     atomicStore(&ctr[C_DEBT], debt - pay);
     scal[1] = prior;
     scal[2] = max(budget - f32(pay) - f32(atomicLoad(&ctr[C_EXPLORE])), 0.0);
-    scal[3] = -40.0; // bornes de log2 λ
+    scal[3] = -40.0; // log2 λ bounds
     scal[4] = 30.0;
 }
 
@@ -1937,7 +1937,7 @@ fn resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
     for (var w = A_FR; w <= A_FL2; w++) { atomicStore(&acc[b + w], 0u); }
     for (var w = A_PM; w < A_SUSP; w++) { atomicStore(&acc[b + w], 0u); }
     for (var w = A_FD; w < A_PD + 3u; w++) { atomicStore(&acc[b + w], 0u); }
-    if (susp == 1u) { atomicStore(&acc[b + A_SUSP], 0u); } // 2 (en attente) persiste
+    if (susp == 1u) { atomicStore(&acc[b + A_SUSP], 0u); } // 2 (pending) persists
 }
 
 // eviction: an eighth of the cells per frame (before the resolve, which resets the footprint to 0)

@@ -182,7 +182,7 @@ steps.)
 
 ## v12 — KRC v2: refining KRC to beat the real SHaRC (commits 7ecba68 → …)
 
-Short tests (`krc duel`, `krc statique`: 480×270 or 256², 3 seeds) to decide fast.
+Short tests (`krc duel`, `krc static`: 480×270 or 256², 3 seeds) to decide fast.
 
 - **Fixed cost** divided by 3 with a moving camera (12.6 → 4.4 ms at 1280×720): insertion without useless CAS or shared
   counter, list of visible cells for allocation and resolve, sweeping eviction.
@@ -245,7 +245,7 @@ Short tests (`krc duel`, `krc statique`: 480×270 or 256², 3 seeds) to decide f
 
 ## v16 — KRC's white dots in the showcase
 
-- Diagnosis per component (`krc vitrinedbg f`: cell indirect only, direct + reflection only, full image, with and without
+- Diagnosis per component (`krc showcasedbg f`: cell indirect only, direct + reflection only, full image, with and without
   the denoiser): the white blotches came from the **cells** (a cell drawing a huge rare value becomes a blotch of its size,
   which the denoiser spreads), not from direct lighting.
 - An error on my side found along the way: after testing thresholds, cell firefly clamping had stayed disabled (1e9) in

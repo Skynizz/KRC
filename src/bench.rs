@@ -68,7 +68,7 @@ pub fn bench(tracer: &Tracer) {
     let (c1, c2, g1) = (l(&cpu, &ra), l(&cpu, &rb), l(g, &ra));
     let (noise, _) = compare(&c1, &c2);
     let (diff, ratio) = compare(&g1, &c1);
-    println!("exactitude (256 spp, {n_surf} px) : relMSE CPU/CPU = {noise:.3e} (bruit), GPU/CPU = {diff:.3e}, luminance GPU/CPU = {ratio:.4}");
+    println!("accuracy (256 spp, {n_surf} px): relMSE CPU/CPU = {noise:.3e} (noise), GPU/CPU = {diff:.3e}, luminance GPU/CPU = {ratio:.4}");
 
     // 2. correlated paths on the GPU: L_old through the same path = retrace in the old scene
     let s1 = State { l2_on: true, ..s0 };

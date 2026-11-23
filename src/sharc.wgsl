@@ -1,5 +1,5 @@
 // ============================================================================================
-// SHaRC (Spatially Hashed Radiance Cache), portage WGSL de NVIDIA RTXGI SHaRC v1.8.3
+// SHaRC (Spatially Hashed Radiance Cache), WGSL port of NVIDIA RTXGI SHaRC v1.8.3
 // (include/HashGridCommon.h, include/SharcCommon.h, https://github.com/NVIDIA-RTX/SHARC).
 //
 // This software contains source code provided by NVIDIA Corporation.
@@ -42,8 +42,8 @@ const SHARC_RESAMPLING_DEPTH_MIN: u32 = 1u;
 
 @group(0) @binding(23) var<storage, read_write> sh_keys: array<atomic<u32>>; // 2 words per entry (lo, hi)
 @group(0) @binding(24) var<storage, read_write> sh_lock: array<atomic<u32>>;
-@group(0) @binding(25) var<storage, read_write> sh_acc: array<atomic<u32>>;  // SharcAccumulationData : uint4
-@group(0) @binding(26) var<storage, read_write> sh_res: array<vec4<u32>>;    // SharcPackedData : half4, sampleData, ext
+@group(0) @binding(25) var<storage, read_write> sh_acc: array<atomic<u32>>;  // SharcAccumulationData: uint4
+@group(0) @binding(26) var<storage, read_write> sh_res: array<vec4<u32>>;    // SharcPackedData: half4, sampleData, ext
 
 // --- 64-bit keys on two u32 ---
 fn hg_put(k: vec2<u32>, v: u32, shift: u32) -> vec2<u32> {
