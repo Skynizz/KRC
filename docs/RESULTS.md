@@ -41,7 +41,7 @@ over the following frames. To reproduce: `cargo run --release -- all`, then `car
 
 ## 1. Main sequence (2 rooms, 120 frames)
 
-![Error per frame](../results/plots/erreur_par_frame.svg)
+![Error per frame](../results/plots/error_per_frame.svg)
 
 | Method | Sequence | Static | Box moves | Lamp B on | Lamp A off |
 |---|---|---|---|---|---|
@@ -75,7 +75,7 @@ Reading:
 
 The allocator samples only cells whose predicted relative error exceeds 3 %, with a cap of 4 paths/pixel.
 
-![Cost per frame](../results/plots/cout_par_frame.svg)
+![Cost per frame](../results/plots/cost_per_frame.svg)
 
 | Method | Paths/frame (mean) | relMSE |
 |---|---|---|
@@ -90,7 +90,7 @@ With 29 % fewer paths, the error drops by 44 %. In static, the cost drops from 4
 
 Constant pixel density (96 px wide per room). Events always touch rooms 0 and 1. Warm-up of 150 frames.
 
-![Cost while the box moves](../results/plots/echelle_cout.svg)
+![Cost while the box moves](../results/plots/scale_cost.svg)
 
 | Target-quality mode, paths/frame | N = 2 | N = 4 | N = 8 |
 |---|---|---|---|
@@ -102,8 +102,8 @@ Constant pixel density (96 px wide per room). Events always touch rooms 0 and 1.
 
 Direct cost of an event (correlated paths):
 
-![Cost per move](../results/plots/echelle_evt_boite.svg)
-![Cost per lamp change](../results/plots/echelle_evt_lampe.svg)
+![Cost per move](../results/plots/scale_evt_box.svg)
+![Cost per lamp change](../results/plots/scale_evt_lamp.svg)
 
 | Correlated paths per event | N = 2 | N = 4 | N = 8 |
 |---|---|---|---|
@@ -274,7 +274,7 @@ worst 0.1 % of pixels is given, with the luminance ratio.
 ## 11. Bias toward dark: diagnosis and fixes
 
 Looking at the Sponza images (and not only the relMSE), the KRC image was 2× too dark 20 frames after the large lamp
-switched off. Indicator: total image luminance / reference over surface pixels (`krc bias`, `results/biais/`).
+switched off. Indicator: total image luminance / reference over surface pixels (`krc bias`, `results/bias/`).
 
 **Cause 1: allocation dilutes rare values.** With heavy-tailed radiance (small bright lamp, indirect), a cell that draws a
 rare value sees its variance explode and is immediately oversampled: the rare value is diluted in an n that grows
@@ -362,7 +362,7 @@ Reading:
   comparison is possible yet**: KRC's minimum cost exceeds SHaRC's total cost.
 - **Not tested, and needed before concluding**: SHaRC's "responsive lighting" mode (`SHARC_ENABLE_RESPONSIVE_LIGHTING`),
   designed for lights that change fast.
-- **KRC's cost with a moving camera** (`results/campagne_cam/passes.txt`, Sponza 1280×720, 0.25 path/px): 12.6 ms per
+- **KRC's cost with a moving camera** (`results/campaign_cam/passes.txt`, Sponza 1280×720, 0.25 path/px): 12.6 ms per
   frame, of which 5.8 ms of hash-table insertion (3.7 M insertions per frame, probes lengthened by tombstones) and 3.6 ms
   of resolve (all 1.35 M cells, visible or not, every frame). Fixed camera: 3.9 ms (resolve 1.0 ms, lookup 0.5 ms).
   SHaRC: 0.8 ms in all.
@@ -474,7 +474,7 @@ Reading:
 
 Fixes (JOURNAL v14): "total + direct share" cells instead of "indirect only" (the direct recomputed at the read-back vertex
 added useless noise), 32 correlated paths per cell for a lamp. Same denoiser for both methods, at two settings of the
-history clamp (1.5 and 3 standard deviations). 3 seeds, `results/jeu_final`.
+history clamp (1.5 and 3 standard deviations). 3 seeds, `results/game_final`.
 
 | Final image, relMSE* sequence (static) | KRC 0.5 p/px | SHaRC 1×1 | SHaRC accumulation 5, 1×1 | Sequence ratio |
 |---|---|---|---|---|
@@ -502,10 +502,10 @@ Reading:
 `cargo run --release -- vitrine 960` (after `sh tools/fetch_sponza.sh`): textured, glossy Sponza (polished, almost mirror
 floor, satin stone, metal, a rolling chrome sphere, a golden sphere), a sky above the roof that sets at frame 100, a gallery
 lamp switching on at frame 80, a walking camera. Same game pipeline for both methods, at equal GPU time (~5.5 ms at
-960×540 without readback). Videos: `results/vitrine/comparaison.mp4` (24 fps) and `comparaison_lente.mp4` (12 fps); stills
+960×540 without readback). Videos: `results/showcase/comparison.mp4` (24 fps) and `comparaison_lente.mp4` (12 fps); stills
 `comparaison_f039/060/090/110.png`.
 
-![After the sky sets](../results/vitrine/comparaison_f110.png)
+![After the sky sets](../results/showcase/comparison_f110.png)
 
 | relMSE* against the reference (2,048 paths/px) | KRC | NVIDIA SHaRC |
 |---|---|---|
@@ -535,7 +535,7 @@ Reading:
 Same conditions as §16 (`cargo run --release -- vitrine 960`), after the fixes of JOURNAL v17. KRC: 16 px cells, 0.4
 path/px, 2 direct estimates per pixel; SHaRC: §16's settings. The denoiser, the MIS and the specular clamp are shared.
 
-![The rolling sphere](../results/vitrine/comparaison_f060.png)
+![The rolling sphere](../results/showcase/comparison_f060.png)
 
 | Against the reference (2,048 paths/px) | KRC | NVIDIA SHaRC |
 |---|---|---|
@@ -572,7 +572,7 @@ Quake II RTX (NVIDIA, Vulkan path tracing), demo `q2demo1` (a real recorded game
 differ only in indirect lighting (`pt_cache`); everything else is the game's engine. Tools: `python tools/q2rtx/capture.py`
 (images and fps), `python tools/q2rtx/lag_test.py` (reaction to a light cut).
 
-![Same frame of the demo](../results/q2rtx/comparaison_f420.png)
+![Same frame of the demo](../results/q2rtx/comparison_f420.png)
 
 | Full demo (timedemo) | Game without cache | NVIDIA SHaRC | KRC (0.1 path/px) |
 |---|---|---|---|
@@ -649,7 +649,7 @@ player's weapon; every lamp cut to 10 % (`light=0.1`); 1280×720.
 | **E1M2** | 46.7 / 44.0 / **47.5** | 33.4 / 32.6 / **37.9** | 35.5 / 35.8 / **39.8** | 42.8 / **43.0** / 42.3 | 4.41 / 3.99 / 4.03 ms |
 | **E1M3** (room lit by emissive panels) | 49.5 / **50.5** / 46.3 | — | — | — | 3.65 / 3.12 / 3.23 ms |
 
-![E1M1, 4 frames after the cut: reference, game / SHaRC, KRC](../results/doomrt/coupure/comparaison_E1M1_plus4.png)
+![E1M1, 4 frames after the cut: reference, game / SHaRC, KRC](../results/doomrt/cut/comparison_E1M1_plus4.png)
 
 Reading:
 
@@ -664,7 +664,7 @@ Reading:
 
 RTGL1 bug found and fixed (for every method): its denoiser's gradient sample read the lamps' old colour back; an intensity
 change never reset the history. Original game on E1M1 after the cut: 21.4 dB at +1, 35.9 dB at +250; fixed: 33.2 and 39.9
-(`results/doomrt/correctif_gradient`, `KRC_FIX_GRADIENT=0` for the old one).
+(`results/doomrt/fix_gradient`, `KRC_FIX_GRADIENT=0` for the old one).
 
 Two measurement pitfalls, fixed before these numbers:
 
@@ -703,7 +703,7 @@ Raw image (off-sky luminance / reference): SHaRC 1.22 at the switch, 1.08 at +12
 level. NRD's history confidence (`IN_DIFF_CONFIDENCE`) helps little: REBLUR only brings the history back to one frame, and
 the old lighting still weighs 50 %.
 
-![Frame 0 after the cut: SHaRC, KRC-L + relit history](../results/rtxgi/salon_soleil2/krcl_norm_nrd_0.png)
+![Frame 0 after the cut: SHaRC, KRC-L + relit history](../results/rtxgi/living_room_sun2/krcl_norm_nrd_0.png)
 
 **Bistro lamps at night** (4 point lamps added, group A from 100 % to 20 %; image ×3 darker): raw, KRC-L correct from frame
 0 (0.999 against 1.108 for SHaRC, caught up at +128). After NRD, small gain: NRD reacts on its own to such a strong change,

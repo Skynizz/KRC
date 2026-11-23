@@ -4,7 +4,7 @@ référence du jeu par accumulation en pause.
     python tools/q2rtx/views.py --map demo1 --view "420 480 -180 12 90" --modes 0 1 2 --ref
     python tools/q2rtx/views.py --scout --map demo1 --view "..." --view "..."   # repérage (jeu seul)
 
-Sorties : results/q2rtx/vues/<nom>/m<méthode>.png, ref.png, comparaison.png, mesures.txt.
+Sorties : results/q2rtx/views/<nom>/m<méthode>.png, ref.png, comparaison.png, mesures.txt.
 """
 import argparse
 import os

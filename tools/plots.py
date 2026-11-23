@@ -275,7 +275,7 @@ def pareto_plot(out):
 
 
 def duel_plot(out):
-    """KRC v2 contre SHaRC officiel : erreur de la séquence contre temps GPU (results/campagne_v2)."""
+    """KRC v2 contre SHaRC officiel : erreur de la séquence contre temps GPU (results/campaign_v2)."""
     import re
     figs = [("sponza", "Sponza, caméra fixe"), ("sponzacam", "Sponza, caméra mobile"),
             ("cornell", "Cornell box, caméra fixe"), ("cornellcam", "Cornell box, caméra mobile")]
