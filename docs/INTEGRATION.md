@@ -1,80 +1,76 @@
-# Intégrer KRC dans un moteur ou un jeu
+# Integrating KRC into an engine or a game
 
-Pour qui : un développeur de moteur qui a déjà un path tracer (ou qui intègre SHaRC). KRC s'ajoute
-**par-dessus SHaRC** : même table de hachage, mêmes passes, plus quelques tampons et cinq points
-d'accroche. Un moteur qui a déjà SHaRC reçoit KRC en une journée ; sans SHaRC, il faut d'abord
-suivre le guide d'intégration de SHaRC (SDK RTXGI de NVIDIA), puis ce document.
+For: an engine developer who already has a path tracer (or is integrating SHaRC). KRC sits **on top of SHaRC**: same
+hash table, same passes, plus a few buffers and five hook points. An engine that already has SHaRC gets KRC in a day;
+without SHaRC, first follow SHaRC's integration guide (NVIDIA's RTXGI SDK), then this document.
 
-Implémentation de référence, compilée et mesurée : le path tracer d'exemple du SDK RTXGI, branche
-`krc` de `F:\rtxgi\sdk` (fichiers `Samples/Pathtracer/Shaders/KrcRelight.hlsli`, `SharcResolve.hlsl`,
-`Pathtracer.hlsl`, `Denoiser.hlsl`, `KrcBench.cpp`). La bibliothèque elle-même est dans
-`Libraries/Krc/include`, recopiée dans ce dépôt sous `krc_sdk/include`.
+Reference implementation, built and measured: the path tracer sample of the RTXGI SDK, on a `krc` branch (files
+`Samples/Pathtracer/Shaders/KrcRelight.hlsli`, `SharcResolve.hlsl`, `Pathtracer.hlsl`, `Denoiser.hlsl`, `KrcBench.cpp`;
+the patches are in `third_party/rtxgi_krc_patches`). The library itself lives in `Libraries/Krc/include`, copied into this
+repository under `krc_sdk/include`.
 
-## Ce que KRC apporte
+## What KRC brings
 
-| Fonction | Fichier | Gain mesuré (banc NVIDIA) | Coût |
+| Feature | File | Measured gain (NVIDIA bench) | Cost |
 |---|---|---|---|
-| Rééclairage exact du cache par groupes de lampes | `KrcRelight.h` | image brute juste dès la frame 0 après un changement de lampe (SHaRC : ~128 frames) | +0,01 à +0,05 ms (salon, 1280×720) |
-| Historique du débruiteur rééclairé (normalisation par S) | `KrcRelight.h` + passe de lissage | ꟻLIP après NRD 0,095 contre 0,114 à la frame 0 (salon, coupure du soleil) | compris ci-dessus ; lissage seulement après un premier rééclairage |
-| Cellules adaptatives (KRC-A) | `KrcAdaptive.hlsli` (exemple) | biais du cache −12 % (relMSE) | +0,24 ms |
+| Exact relighting of the cache by light groups | `KrcRelight.h` | correct raw image from frame 0 after a lamp change (SHaRC: ~128 frames) | +0.01 to +0.05 ms (living room, 1280×720) |
+| Denoiser history relit (normalisation by S) | `KrcRelight.h` + smoothing pass | ꟻLIP after NRD 0.095 against 0.114 at frame 0 (living room, sun cut) | included above; smoothing only after a first relight |
+| Adaptive cells (KRC-A) | `KrcAdaptive.hlsli` (sample) | cache bias −12 % (relMSE) | +0.24 ms |
 
-## Les cinq points d'accroche
+## The five hook points
 
-Tout passe par `KrcRelightParameters` (tampons et réglages), comme SHaRC avec `SharcParameters`.
-Inclure `KrcRelight.h` après `SharcCommon.h`.
+Everything goes through `KrcRelightParameters` (buffers and settings), like SHaRC with `SharcParameters`. Include
+`KrcRelight.h` after `SharcCommon.h`.
 
-1. **Tampons** (une entrée par entrée de la table de SHaRC, remis à zéro avec elle) :
-   `uint4` sommes de la frame, `float4` parts lissées, `float2` facteurs (k de la frame, produit S).
-   Soit 40 octets par entrée : 160 Mo pour les 4 M d'entrées de l'exemple ; 1 M d'entrées suffit
-   souvent (40 Mo).
-2. **Mise à jour de SHaRC** (passe de mise à jour) :
-   - à chaque lampe évaluée au sommet, `krcDirectGroups += KrcGroupSplit(p, lightIndex, contribution)` ;
-   - juste avant `SharcUpdateHit` : `KrcUpdateHit(sharc, p, sharcState, hitData, directLighting, krcDirectGroups, random)`
-     avec **le même nombre aléatoire** que `SharcUpdateHit` (le tirer une fois dans une variable) ;
-   - juste avant `SharcUpdateMiss` : `KrcUpdateMiss(p, sharcState, skyRadiance)`.
-3. **Résolution** : `bool v = KrcResolveEntry(i, sharc, p, accumulationFrameNum);` avant
-   `SharcResolveEntry`, puis `KrcResolveEviction(i, sharc, p, v);` après.
-4. **Passe de rééclairage** : une passe de calcul, un fil par entrée, `KrcRelightEntry(i, sharc, p)`,
-   **avant la mise à jour de SHaRC**, seulement les frames où `KrcRelightFrame::event` est vrai.
-5. **Côté CPU** : `KrcRelightHost` (`KrcRelightHost.h`) reçoit chaque frame la puissance et le
-   groupe de chaque lampe, et rend les rapports, `lightGroups`, `event` et `active`.
+1. **Buffers** (one entry per SHaRC table entry, cleared with it): `uint4` frame sums, `float4` smoothed shares, `float2`
+   factors (frame k, product S). That is 40 bytes per entry: 160 MB for the sample's 4 M entries; 1 M entries is often
+   enough (40 MB).
+2. **SHaRC update** (update pass):
+   - for each lamp evaluated at the vertex, `krcDirectGroups += KrcGroupSplit(p, lightIndex, contribution)`;
+   - right before `SharcUpdateHit`: `KrcUpdateHit(sharc, p, sharcState, hitData, directLighting, krcDirectGroups, random)`
+     with **the same random number** as `SharcUpdateHit` (draw it once into a variable);
+   - right before `SharcUpdateMiss`: `KrcUpdateMiss(p, sharcState, skyRadiance)`.
+3. **Resolve**: `bool v = KrcResolveEntry(i, sharc, p, accumulationFrameNum);` before `SharcResolveEntry`, then
+   `KrcResolveEviction(i, sharc, p, v);` after.
+4. **Relight pass**: a compute pass, one thread per entry, `KrcRelightEntry(i, sharc, p)`, **before the SHaRC update**,
+   only on frames where `KrcRelightFrame::event` is true.
+5. **CPU side**: `KrcRelightHost` (`KrcRelightHost.h`) receives each lamp's power and group every frame, and returns the
+   ratios, `lightGroups`, `event` and `active`.
 
-Groupes : 0 à 2 suivis, 3 fixe. Le moteur choisit : par exemple 0 soleil, 1 lampes d'intérieur,
-2 lampes qui clignotent ; dans Doom, un groupe par secteur et forme de lampe. Un groupe dont les
-lampes changent de rapports différents, ou qui s'allument depuis zéro, est inconnu cette frame-là
-(pas de rééclairage : SHaRC reprend la main, avec son retard).
+Groups: 0 to 2 tracked, 3 fixed. The engine chooses: for example 0 sun, 1 indoor lamps, 2 flickering lamps; in Doom, one
+group per sector and lamp shape. A group whose lamps change by different ratios, or switch on from zero, is unknown that
+frame (no relighting: SHaRC takes over, with its lag).
 
-## Débruiteur (facultatif, recommandé)
+## Denoiser (optional, recommended)
 
-NRD, DLSS RR et les autres gardent leur propre historique, que le cache ne peut pas toucher. Pour
-qu'il suive le rééclairage :
-1. au premier point touché de chaque pixel, écrire `KrcGetRelightFactor(sharc, p, pos, normal).y`
-   (le produit S) dans une texture, si `active` ;
-2. lisser cette texture (passe `krcScaleBlur` de `Denoiser.hlsl` : 9 × 9 prises espacées de 4 pixels,
-   en logarithme, arrêtée aux arêtes), sinon les cellules se dessinent dans l'image ;
-3. diviser l'entrée du débruiteur par S lissé, multiplier sa sortie par le même S.
+NRD, DLSS RR and the others keep their own history, which the cache cannot touch. For it to follow the relighting:
+1. at the first hit of each pixel, write `KrcGetRelightFactor(sharc, p, pos, normal).y` (the product S) into a texture, if
+   `active`;
+2. smooth that texture (the `krcScaleBlur` pass of `Denoiser.hlsl`: 9 × 9 taps spaced 4 pixels apart, in log space,
+   stopped at edges), otherwise the cells show in the image;
+3. divide the denoiser's input by the smoothed S, multiply its output by the same S.
 
-Variante non retenue : la confiance d'historique de NRD (`IN_DIFF_CONFIDENCE`) ; REBLUR ne ramène
-son historique qu'à une frame, l'ancien éclairage pèse encore 50 % puis s'efface en 1/n.
+Variant not kept: NRD's history confidence (`IN_DIFF_CONFIDENCE`); REBLUR only brings its history back to one frame, the
+old lighting still weighs 50 % and then fades as 1/n.
 
-## Pièges rencontrés
+## Pitfalls met
 
-- L'exemple de NVIDIA ne tire par défaut que la lampe 0 en lumière directe (`targetLight = 0`) :
-  des lampes ajoutées ne servent à rien tant qu'on ne le met pas à −1.
-- Tout changement d'en-tête partagé CPU/GPU (constantes) doit recompiler tous les fichiers ; le
-  compilateur MSVC en français casse le suivi des en-têtes par Ninja.
-- Ne pas parcourir toute la table pour remettre des zéros chaque frame : la plupart des entrées
-  sont vides, et 4 M d'écritures coûtent plus que le reste de KRC.
-- GLSL (Quake II RTX, RTGL1) : `KrcRelight.h` suit les conventions de SHaRC (`RW_STRUCTURED_BUFFER`,
-  `BUFFER_AT_OFFSET`) mais utilise la syntaxe HLSL (`float3`, `lerp`, `saturate`, `InterlockedAdd`) ;
-  il faut les mêmes macros de compatibilité que celles du projet pour SHaRC.
+- NVIDIA's sample samples only lamp 0 for direct light by default (`targetLight = 0`): added lamps do nothing until it is
+  set to −1.
+- Any change to a CPU/GPU shared header (constants) must rebuild every file; the French-language MSVC compiler breaks
+  Ninja's header tracking.
+- Do not walk the whole table to write zeros every frame: most entries are empty, and 4 M writes cost more than the rest
+  of KRC.
+- GLSL (Quake II RTX, RTGL1): `KrcRelight.h` follows SHaRC's conventions (`RW_STRUCTURED_BUFFER`, `BUFFER_AT_OFFSET`) but
+  uses HLSL syntax (`float3`, `lerp`, `saturate`, `InterlockedAdd`); it needs the same compatibility macros as the
+  project uses for SHaRC.
 
-## Où le tester
+## Where to test it
 
-| Cible | État | Effort |
+| Target | State | Effort |
 |---|---|---|
-| Path tracer d'exemple de NVIDIA (RTXGI) | fait, banc automatique (`tools/rtxgi/`) | — |
-| Quake II RTX (`F:/Q2RTX-KRC`, GLSL, SHaRC officiel) | KRC d'origine intégré ; la bibliothèque est à brancher | 1 à 2 jours |
-| Doom RT (PrBoom+ RT / RTGL1, GLSL) | KRC d'origine intégré, rééclairage exact | — |
-| RTX Remix (`dxvk-remix`, open source) | à étudier : un seul branchement donne Portal, Half-Life 2, Morrowind… ; son cache actuel est NRC, il faudrait vérifier dans ses sources s'il a aussi SHaRC | 1 à 2 semaines |
-| Unreal Engine 5 (sources accessibles) | à étudier, plus lourd (path tracer de référence, pas temps réel) | plusieurs semaines |
+| NVIDIA's path tracer sample (RTXGI) | done, automatic bench (`tools/rtxgi/`) | — |
+| Quake II RTX (GLSL, official SHaRC) | original KRC integrated; the library still to plug in | 1 to 2 days |
+| Doom RT (PrBoom+ RT / RTGL1, GLSL) | original KRC integrated, exact relighting | — |
+| RTX Remix (`dxvk-remix`, open source) | to study: a single integration covers Portal, Half-Life 2, Morrowind…; its current cache is NRC, its sources should be checked for SHaRC too | 1 to 2 weeks |
+| Unreal Engine 5 (sources available) | to study, heavier (reference path tracer, not real time) | several weeks |

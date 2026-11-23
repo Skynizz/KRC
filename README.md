@@ -22,12 +22,12 @@ The starting idea had three parts: a cache with uncertainty, rays allocated to u
 - **Statistics decide, not heuristics.** Dependencies point to suspects and a statistical test decides. Rays are
   allocated with Neyman allocation and a Bayesian prior; cell sizes are chosen by a statistical test.
 
-The full reasoning and protocol: [docs/HYPOTHESE.md](docs/HYPOTHESE.md) (in French).
+The full reasoning and protocol: [docs/HYPOTHESIS.md](docs/HYPOTHESIS.md).
 
 ## Results
 
 All numbers are measured, at equal budget, against a converged reference, with several seeds. Details, plots and
-every negative result: [docs/RESULTATS.md](docs/RESULTATS.md) (in French).
+every negative result: [docs/RESULTS.md](docs/RESULTS.md).
 
 - **Dynamic sequence (box scene, equal budget):** KRC divides the error by 3 compared with the best classic cache, and
   by 21 compared with accumulated path tracing (relMSE 4.1e-3 against 1.25e-2 and 8.9e-2).
@@ -81,13 +81,13 @@ cargo run --release -- sponza 480
 | `third_party/` | patches for Quake II RTX, RTGL1 and the RTXGI SDK, SHaRC license |
 | `tools/` | measurement benches and plots |
 | `reshade/` | the KRC GI ReShade effect |
-| `docs/` | hypothesis, results, state of the art, roadmap, integration, journal (in French) |
+| `docs/` | hypothesis, results, state of the art, roadmap, integration, journal |
 | `results/` | measurements and plots |
 
 ## State of the art
 
 What KRC takes from recent work and what remains its own (correlated paths, relighting by light groups and of the
-denoiser's history, statistical cell sizes) is listed in [docs/ETAT_DE_L_ART.md](docs/ETAT_DE_L_ART.md). The step-by-step
+denoiser's history, statistical cell sizes) is listed in [docs/STATE_OF_THE_ART.md](docs/STATE_OF_THE_ART.md). The step-by-step
 log of every experiment is [docs/JOURNAL.md](docs/JOURNAL.md).
 
 ## License

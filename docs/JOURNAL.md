@@ -1,523 +1,422 @@
-# Journal de bord
+# Development journal
 
-(Les numéros de commit cités renvoient au dépôt d'origine, où KRC est né ; l'historique de ce dépôt garde les mêmes étapes.)
+(The commit numbers quoted refer to the original repository, where KRC started; this repository's history keeps the same
+steps.)
 
-## 2026-10-21 — Démarrage
+## 2026-10-21 — Start
 
-- Idée initiale reçue (H0 : cache + incertitude + graphe de dépendances par objets).
-- État de l'art : l'ancêtre le plus proche de la brique « dépendances » est
-  *Selective Photon Tracing* (Dmitriev et al., EGWR 2002), qui re-trace côté lumière
-  les photons des zones modifiées. Les caches temps réel (SHaRC, NRC, DDGI) gèrent le
-  dynamique par hystérésis ou apprentissage continu, sans dépendances explicites.
-- Critique de H0 et reformulation en H* : voir [HYPOTHESE.md](HYPOTHESE.md).
-  1. Dépendances par *régions traversées* plutôt que par *objets touchés*
-     (faux négatifs : nouvelle ombre, lampe allumée).
-  2. Les dépendances désignent des suspects, un test statistique décide
-     (contre les faux positifs).
-  3. Les cascades sont tronquées par l'erreur (filet statistique), pas par la profondeur.
-  4. Une seule monnaie : l'incertitude (Neyman + a priori bayésien).
-- Choix techniques : Rust (CPU, zéro dépendance, multi-thread `std::thread::scope`),
-  scène de boîtes alignées sur les axes, NEE sur lampes rectangulaires, 192×96 px.
+- Initial idea received (H0: cache + uncertainty + dependency graph by objects).
+- State of the art: the closest ancestor of the "dependencies" building block is *Selective Photon Tracing* (Dmitriev et
+  al., EGWR 2002), which retraces, on the light side, the photons of modified areas. Real-time caches (SHaRC, NRC, DDGI)
+  handle dynamics through hysteresis or continuous learning, without explicit dependencies.
+- Critique of H0 and reformulation as H*: see [HYPOTHESIS.md](HYPOTHESIS.md).
+  1. Dependencies by *regions crossed* rather than by *objects touched* (false negatives: new shadow, lamp switched on).
+  2. Dependencies point to suspects, a statistical test decides (against false positives).
+  3. Cascades are truncated by error (statistical net), not by depth.
+  4. A single currency: uncertainty (Neyman + Bayesian prior).
+- Technical choices: Rust (CPU, zero dependencies, multithreaded with `std::thread::scope`), a scene of axis-aligned
+  boxes, NEE on rectangular lamps, 192×96 px.
 
-## v1 — premier prototype (commit 23e1272)
+## v1 — first prototype (commit 23e1272)
 
-- **Bug : famine de l'a priori.** Après un événement, presque toutes les cellules sont
-  suspectes. Les seules cellules « mûres » restantes sont les faces tournées vers le
-  vide (σ = 0), donc l'a priori vaut 0, les cellules invalidées ont un gain nul et ne
-  sont plus jamais échantillonnées : l'image gèle. Correctif : a priori calculé sur
-  *toutes* les cellules mûres, avec un plancher de 0,1. C'est exactement le piège que
-  l'a priori bayésien devait éviter.
-- **Bug : régions mal alignées.** Une région de 0,75 m chevauchait les deux faces de
-  la cloison et créait de fausses dépendances entre les pièces. Correctif : régions de
-  0,6 m, la cloison tombe sur une frontière.
-- **Résultat négatif : le z-test de vérification est sous-puissant.** Avec 8
-  échantillons de path tracing (variance relative ~2 par échantillon), on ne détecte
-  même pas une pièce qui s'éteint : la cellule est confirmée à tort et garde l'ancien
-  éclairage (`krc_ztest`, lampe éteinte : 9,5e-2 contre 6,5e-3 pour l'invalidation
-  dure). *Tester* si une cellule a changé avec des échantillons indépendants est une
-  impasse.
+- **Bug: prior starvation.** After an event, almost every cell is a suspect. The only "mature" cells left are faces
+  turned toward the void (σ = 0), so the prior is 0, invalidated cells have zero gain and are never sampled again: the
+  image freezes. Fix: prior computed over *all* mature cells, with a floor of 0.1. Exactly the trap the Bayesian prior
+  was meant to avoid.
+- **Bug: misaligned regions.** A 0.75 m region straddled both faces of the partition and created false dependencies
+  between the rooms. Fix: 0.6 m regions, the partition falls on a boundary.
+- **Negative result: the verification z-test is underpowered.** With 8 path-tracing samples (relative variance ~2 per
+  sample), not even a room going dark is detected: the cell is wrongly confirmed and keeps the old lighting (`krc_ztest`,
+  lamp off: 9.5e-2 against 6.5e-3 for hard invalidation). *Testing* whether a cell changed with independent samples is a
+  dead end.
 
-## v2 — mesurer le changement au lieu de le tester (commit c07d5dc)
+## v2 — measuring the change instead of testing it (commit c07d5dc)
 
-- **Pivot (H\*\*) : mise à jour différentielle par chemins corrélés.** On retrace les
-  mêmes chemins (même graine) dans l'ancienne et la nouvelle scène. Un chemin qui ne
-  touche ni la zone changée ni une lampe changée est *identique* : Δ = 0 exactement,
-  sans second tracé. On *corrige* l'estimation (moyenne += Δ̂) au lieu de la jeter.
-  C'est le vrai analogue de la compilation incrémentale : on applique un diff.
-- Une pmf de lampes « union » (indépendante de l'état allumé/éteint) est nécessaire
-  pour que les deux scènes consomment les mêmes nombres aléatoires.
-- **Bug : dépendance des rayons d'ombre.** On enregistrait le segment jusqu'à la lampe,
-  même quand le rayon était bloqué. Correctif : segment jusqu'à l'occulteur.
-- **Variable de contrôle** : μ = x̄ − β(ȳ − μ_cache), avec β optimal estimé sur les
-  paires. β = 1 donne le delta pur, β = 0 un redémarrage frais. En pratique, β optimal
-  et β = 1 sont statistiquement indiscernables sur cette scène.
-- Plusieurs graines (5) : les écarts entre variantes delta sont dans le bruit.
-- **Constat important** : `krc_all` (delta sur *toutes* les cellules, sans graphe) est
-  aussi précis que `krc`. La sortie anticipée exacte des chemins corrélés est
-  elle-même un test de dépendance, par chemin et exact. Le graphe ne sert qu'à réduire
-  le *coût* : O(cellules affectées) au lieu de O(cellules visibles).
+- **Pivot (H\*\*): differential update through correlated paths.** The same paths (same seed) are retraced in the old and
+  the new scene. A path that touches neither the changed area nor a changed lamp is *identical*: Δ = 0 exactly, without a
+  second trace. The estimate is *corrected* (mean += Δ̂) instead of being thrown away. The true analogue of incremental
+  compilation: a diff is applied.
+- A "union" lamp pmf (independent of the on/off state) is needed so that both scenes consume the same random numbers.
+- **Bug: shadow-ray dependency.** The segment up to the lamp was recorded, even when the ray was blocked. Fix: segment up
+  to the occluder.
+- **Control variate**: μ = x̄ − β(ȳ − μ_cache), with the optimal β estimated on the pairs. β = 1 gives the pure delta,
+  β = 0 a fresh restart. In practice, the optimal β and β = 1 are statistically indistinguishable on this scene.
+- Several seeds (5): the differences between delta variants are within the noise.
+- **Important finding**: `krc_all` (delta on *every* cell, no graph) is as accurate as `krc`. The exact early exit of
+  correlated paths is itself a dependency test, per path and exact. The graph only serves to reduce the *cost*:
+  O(affected cells) instead of O(visible cells).
 
-## v3 — passage à l'échelle et événements de lampes (commit 3f0533c)
+## v3 — scaling and lamp events (commit 3f0533c)
 
-- Scène paramétrée par le nombre de pièces (2, 4, 8), à densité de pixels constante.
-- **Changement de lampes seules** : la géométrie est identique, donc l'ancienne
-  radiance se déduit du même chemin : L_old = L + Σ_j w_j C_j, où C_j est la
-  contribution qu'aurait la lampe j si elle était allumée. Plus de second tracé, et le
-  coût d'un événement de lampe est divisé par deux (20 k au lieu de 37,7 k chemins).
-  Exactitude vérifiée chemin par chemin contre un retraçage complet.
-- **Bug révélé par ce changement : la règle d'arrêt du m adaptatif est fausse pour les
-  lampes.** Si 2 chemins n'ont pas *sélectionné* la lampe changée, Δ = 0 exactement et
-  la cellule est déclarée inchangée : biais de +7,8 % dans la pièce A. La sélection NEE
-  est aléatoire et indépendante de l'importance de la lampe pour la cellule, donc
-  « Δ = 0 sur 2 tirages » ne prouve rien. Correctif : M_DELTA chemins pour toute
-  cellule suspecte lors d'un changement de lampe. (Pour la géométrie, l'arrêt reste
-  justifié : une cellule dont les chemins touchent rarement la zone balayée a un Δ
-  petit, borné par cette fréquence.)
-- Diagnostic de la traîne après l'extinction de A : ce n'est pas un biais (|biais| <
-  0,6 %) mais de la variance dans la pièce A devenue sombre. Hypothèses testées et
-  réfutées : variance par échantillon sous-estimée (A), m₀ trop petit (F, effet
-  faible), n_eff trop grand (effet faible).
-- Erreur de méthode, de mon côté : mes agrégats rapides lisaient `metrics*.csv`, qui
-  contenait des graines laissées par une version antérieure du code. J'ai nettoyé et
-  tout relancé ; les chiffres de RESULTATS.md viennent d'un run propre.
+- Scene parameterised by the number of rooms (2, 4, 8), at constant pixel density.
+- **Lamp-only changes**: the geometry is identical, so the old radiance follows from the same path:
+  L_old = L + Σ_j w_j C_j, where C_j is the contribution lamp j would have if it were on. No second trace, and the cost of
+  a lamp event is halved (20 k instead of 37.7 k paths). Exactness checked path by path against a full retrace.
+- **Bug revealed by this change: the stopping rule of the adaptive m is wrong for lamps.** If 2 paths did not *select*
+  the changed lamp, Δ = 0 exactly and the cell is declared unchanged: +7.8 % bias in room A. NEE selection is random and
+  independent of the lamp's importance for the cell, so "Δ = 0 over 2 draws" proves nothing. Fix: M_DELTA paths for every
+  suspect cell on a lamp change. (For geometry, stopping stays justified: a cell whose paths rarely touch the swept area
+  has a small Δ, bounded by that frequency.)
+- Diagnosis of the tail after A switches off: it is not a bias (|bias| < 0.6 %) but variance in room A, now dark.
+  Hypotheses tested and refuted: underestimated per-sample variance (A), m₀ too small (F, weak effect), n_eff too large
+  (weak effect).
+- Method error, on my side: my quick aggregates read `metrics*.csv`, which held seeds left by an earlier version of the
+  code. I cleaned up and reran everything; the numbers in RESULTS.md come from a clean run.
 
-## v4 — vieillissement des dépendances, résultats consolidés (commit e307e72 et suivant)
+## v4 — dependency ageing, consolidated results (commit e307e72 and following)
 
-- **Cascades mesurées** : à 8 pièces, allumer la lampe B rendait 80 % des cellules
-  suspectes. Les dépendances binaires accumulées sur tout l'historique saturent : un
-  seul chemin passé par deux portes suffit.
-- **Vieillissement** : deux bitsets alternés couvrent les K à 2K derniers échantillons
-  (K = 64). Effet net pour la géométrie (suspects à N = 8 : 1 070 contre 1 837) et pour
-  l'extinction de A, mais pas pour l'allumage de B.
-- Diagnostic (debug des régions de l'événement) : les sondes de la lampe B traversent
-  réellement la porte et touchent les murs des pièces 0 et 2. Le graphe a raison
-  *qualitativement* ; il lui manque la *magnitude*. Prochaine étape : des dépendances
-  pondérées par l'énergie.
-- Préchauffage de 150 frames pour le passage à l'échelle. Sans lui, les coûts mesurés
-  en mode qualité cible à N = 8 étaient dominés par la convergence initiale.
-- Résultats consolidés : voir [RESULTATS.md](RESULTATS.md).
+- **Cascades measured**: at 8 rooms, switching on lamp B made 80 % of cells suspects. Binary dependencies accumulated
+  over the whole history saturate: a single path through two doors is enough.
+- **Ageing**: two alternating bitsets cover the last K to 2K samples (K = 64). A clear effect for geometry (suspects at
+  N = 8: 1,070 against 1,837) and for A switching off, but not for B switching on.
+- Diagnosis (debugging the event's regions): lamp B's probes really go through the door and touch the walls of rooms 0
+  and 2. The graph is *qualitatively* right; it lacks the *magnitude*. Next step: energy-weighted dependencies.
+- 150-frame warm-up for scaling. Without it, costs measured in target-quality mode at N = 8 were dominated by the initial
+  convergence.
+- Consolidated results: see [RESULTS.md](RESULTS.md).
 
-## v5 — dépendances pondérées par l'énergie (commit 711c5d9)
+## v5 — energy-weighted dependencies (commit 711c5d9)
 
-- **Vérité terrain d'abord** : changement signé agrégé par pièce entre références
-  (N = 8). Lampe B allumée : pièces 0 à 3 = +4,1 %, +153 %, +165 %, +1,1 % ; pièces 4 à 7
-  < 0,1 %. Le graphe binaire rendait suspectes ~78 % des cellules *partout*. (Un
-  premier calcul en |Δ| moyen par pixel donnait 2 à 5 % partout : c'était le bruit des
-  références.)
-- Sondes de lampe avec magnitude : ΔL_R ≈ ρ·kΦ/(P·π·A_R).
-- **Impasse 1** : sketch haché sur 256 compteurs. Une cellule traverse 100 à 300
-  régions par fenêtre, les collisions rendent toutes les fréquences élevées, donc tout
-  devient suspect.
-- **Impasse 2** : fréquences de *traversée* sur super-régions exactes. Les rayons qui
-  s'échappent par la façade ouverte longent les autres pièces sans y rebondir.
-- **Ce qui marche** : fréquences des *sommets* de chemin (là où la lumière est captée)
-  par super-région (36 compteurs u8 par fenêtre), et critère « régions traversées ET
-  Σ f_S·M_S > 1 % de la radiance ». Suspects par pièce : 100/100/94/53/8/1,5/0,3/0,6 %,
-  ce qui colle à la physique.
-- N = 8, lampe B allumée : 7 016 → 3 466 suspects, 56 k → 28 k chemins (−51 %), erreur
-  équivalente.
+- **Ground truth first**: signed change aggregated per room between references (N = 8). Lamp B on: rooms 0 to 3 = +4.1 %,
+  +153 %, +165 %, +1.1 %; rooms 4 to 7 < 0.1 %. The binary graph made ~78 % of cells suspects *everywhere*. (A first
+  computation as a mean |Δ| per pixel gave 2 to 5 % everywhere: that was the references' noise.)
+- Lamp probes with magnitude: ΔL_R ≈ ρ·kΦ/(P·π·A_R).
+- **Dead end 1**: a hashed sketch over 256 counters. A cell crosses 100 to 300 regions per window, collisions make every
+  frequency high, so everything becomes a suspect.
+- **Dead end 2**: *traversal* frequencies over exact super-regions. Rays escaping through the open front run along the
+  other rooms without bouncing in them.
+- **What works**: frequencies of path *vertices* (where light is picked up) per super-region (36 u8 counters per window),
+  and the criterion "regions crossed AND Σ f_S·M_S > 1 % of the radiance". Suspects per room:
+  100/100/94/53/8/1.5/0.3/0.6 %, which matches the physics.
+- N = 8, lamp B on: 7,016 → 3,466 suspects, 56 k → 28 k paths (−51 %), equivalent error.
 
-## v6 — traceur GPU (commit b3660fe)
+## v6 — GPU tracer (commit b3660fe)
 
-- RTX 4070, wgpu 24 sur Vulkan (ray query matériel disponible, pas encore utilisé).
-- `trace.wgsl` : portage fidèle de `pt.rs`, interface `Tracer` commune CPU/GPU.
-- Validation : relMSE GPU/CPU = bruit CPU/CPU ; chemins corrélés exacts sur GPU
-  (≤ 2e-7) ; mêmes statistiques de dépendances.
-- Débit : le calcul pur atteint 466 M chemins/s. Deux surcoûts trouvés et corrigés :
-  recréer les buffers à chaque appel (~85 ms), et fabriquer un DepRec de 450 octets
-  par résultat même sans dépendances (900 Mo pour 2 M chemins).
-- **Leçon d'architecture** : avec dépendances, le gain n'est que de ×1,6, parce que
-  relire les dépendances de chaque chemin coûte plus que les tracer. Pour du temps
-  réel, le cache doit vivre sur le GPU et rien ne doit revenir au CPU par chemin.
+- RTX 4070, wgpu 24 on Vulkan (hardware ray query available, not used yet).
+- `trace.wgsl`: a faithful port of `pt.rs`, a `Tracer` interface shared by CPU and GPU.
+- Validation: GPU/CPU relMSE = CPU/CPU noise; exact correlated paths on the GPU (≤ 2e-7); same dependency statistics.
+- Throughput: pure compute reaches 466 M paths/s. Two overheads found and fixed: recreating buffers on every call
+  (~85 ms), and building a 450-byte DepRec per result even without dependencies (900 MB for 2 M paths).
+- **Architecture lesson**: with dependencies, the gain is only ×1.6, because reading back each path's dependencies costs
+  more than tracing them. For real time, the cache must live on the GPU and nothing must come back to the CPU per path.
 
-## v7 — profilage, tout le pipeline sur GPU (commits 3bfd29d → 5a5bbac)
+## v7 — profiling, the whole pipeline on the GPU (commits 3bfd29d → 5a5bbac)
 
-- **Profil d'un lot 1080p** (timestamps GPU + chronomètres par phase) : sans dépendances,
-  le noyau prend 2,6 ms sur 113 ms. Plus de 97 % du temps est de la plomberie CPU↔GPU
-  (préparation, envoi, relecture, conversion). D'où le portage complet.
-- **Mémoire** : bitset binaire par cellule à 0,6 / 1,2 / 2,4 m (864 / 108 / 16 octets). La
-  pondération par l'énergie fait le gros du tri : L2 (16 octets) ne coûte que +14 à
-  +33 % de chemins par événement, et l'erreur reste dans les barres. L2 est retenu.
-- **Pipeline entièrement GPU** (`krc_gpu.wgsl`, ~20 passes) : G-buffer, table de hachage
-  (CAS en deux temps, sans attente active), événement, chemins corrélés en 2 tours,
-  allocation, traçage avec fusion atomique, résolution, affichage. Le CPU n'envoie que la
-  scène et l'événement.
-- Bugs trouvés en route : remise à zéro des compteurs incomplète (2 groupes au lieu de 4),
-  budget sous-consommé à 69 % (arrondi des quotas, puis sensibilité extrême de Σquota(λ) à
-  l'état convergé : 3 balayages de 32 candidats), dispatch > 65 535 groupes.
-- Optimisations mesurées : allocation par balayages parallèles (12× plus rapide qu'une
-  bisection à un seul groupe), dispatch indirect sur le nombre réel de cellules, DDA
-  grossier hors chemins corrélés, entrelacement des tâches contre la contention des
-  atomiques.
-- Validation : `gpu_krc` 4,19e-3 contre 4,11e-3 pour `krc_energy_l2` CPU ; `gpu_sharc`
-  égal à `cache_ema` CPU.
+- **Profile of a 1080p batch** (GPU timestamps + per-phase timers): without dependencies, the kernel takes 2.6 ms out of
+  113 ms. Over 97 % of the time is CPU↔GPU plumbing (preparation, upload, readback, conversion). Hence the full port.
+- **Memory**: binary bitset per cell at 0.6 / 1.2 / 2.4 m (864 / 108 / 16 bytes). Energy weighting does most of the
+  sorting: L2 (16 bytes) costs only +14 to +33 % of paths per event, and the error stays within the bars. L2 is kept.
+- **Fully GPU pipeline** (`krc_gpu.wgsl`, ~20 passes): G-buffer, hash table (two-step CAS, no spin-waiting), event,
+  correlated paths in 2 rounds, allocation, tracing with atomic merging, resolve, display. The CPU only sends the scene
+  and the event.
+- Bugs found along the way: incomplete counter reset (2 groups instead of 4), budget under-used at 69 % (quota rounding,
+  then extreme sensitivity of Σquota(λ) in the converged state: 3 sweeps of 32 candidates), dispatch > 65,535 groups.
+- Measured optimisations: allocation by parallel sweeps (12× faster than a single-group bisection), indirect dispatch on
+  the real number of cells, coarse DDA outside correlated paths, task interleaving against atomic contention.
+- Validation: `gpu_krc` 4.19e-3 against 4.11e-3 for CPU `krc_energy_l2`; `gpu_sharc` equal to CPU `cache_ema`.
 
-## v8 — dérive longue (commits 9705364, 39ad338)
+## v8 — long drift (commits 9705364, 39ad338)
 
-- 12 000 frames (100 cycles de la séquence). Aucune saturation, aucune croissance de la
-  table, dette revenue à 0.
-- Deux défauts trouvés et corrigés :
-  1. Après un gros changement combiné (redémarrage de cycle : boîte + 2 lampes),
-     l'erreur restait 3× plus haute pendant ~40 frames : le n_eff d'une estimation
-     corrigée était trop optimiste. Plafond N_POST = 64 (balayage 32/64/128/sans).
-  2. Une dérive lente (+3,1 % ± 1,3 % sur 100 cycles, t = 2,4) : historique plafonné à
-     1 024 échantillons, ce qui la ramène à −0,8 % ± 1,4 %.
+- 12,000 frames (100 cycles of the sequence). No saturation, no table growth, debt back to 0.
+- Two defects found and fixed:
+  1. After a large combined change (cycle restart: box + 2 lamps), the error stayed 3× higher for ~40 frames: the n_eff of
+     a corrected estimate was too optimistic. Cap N_POST = 64 (sweep 32/64/128/none).
+  2. A slow drift (+3.1 % ± 1.3 % over 100 cycles, t = 2.4): history capped at 1,024 samples, which brings it back to
+     −0.8 % ± 1.4 %.
 
-## v9 — triangles et ray tracing matériel, comparaison en ms (commits 6d2ae3f → …)
+## v9 — triangles and hardware ray tracing, comparison in ms (commits 6d2ae3f → …)
 
-- wgpu 24 expose le ray query Vulkan (BLAS/TLAS) sur la RTX 4070.
-- Shader en gabarit : grille propre à la scène et bloc de géométrie interchangeable
-  (boîtes, ou triangles par ray query sur la TLAS courante et la précédente).
-  Sondes de lampe et références calculées sur GPU (~1 G chemins/s).
-- Cornell box en triangles, même séquence : `tri_krc` 5,03e-3 ± 4e-5 contre
-  `tri_sharc` 3,91e-2 (7,8×).
-- **Comparaison erreur/temps (1024×1024)** : à temps GPU moyen égal, KRC a 2,4 à 2,9×
-  moins d'erreur que SHaRC ; à erreur égale, il est ~2× plus rapide. Mais ses frames
-  d'événement montent à 12–16 ms (p95 ~13 ms), contre un coût constant pour SHaRC.
-- **Résultat négatif : amortir les événements de lampe** (chemins corrélés plafonnés à
-  1 chemin/px, cellules en attente) réduit bien le pic (16,3 → 8,7 ms), mais l'erreur
-  monte de 4,7e-3 à 1,19e-2 : des cellules très fausses restent affichées pendant
-  2 frames. Le p95 reste de toute façon fixé par les pas de la boîte. Option conservée,
-  désactivée.
+- wgpu 24 exposes Vulkan ray query (BLAS/TLAS) on the RTX 4070.
+- Templated shader: a scene-specific grid and an interchangeable geometry block (boxes, or triangles through ray query on
+  the current and previous TLAS). Lamp probes and references computed on the GPU (~1 G paths/s).
+- Cornell box in triangles, same sequence: `tri_krc` 5.03e-3 ± 4e-5 against `tri_sharc` 3.91e-2 (7.8×).
+- **Error/time comparison (1024×1024)**: at equal mean GPU time, KRC has 2.4 to 2.9× less error than SHaRC; at equal
+  error, it is ~2× faster. But its event frames climb to 12–16 ms (p95 ~13 ms), against a constant cost for SHaRC.
+- **Negative result: amortising lamp events** (correlated paths capped at 1 path/px, cells waiting) does reduce the peak
+  (16.3 → 8.7 ms), but the error rises from 4.7e-3 to 1.19e-2: very wrong cells stay displayed for 2 frames. The p95 is
+  set by the box's steps anyway. Option kept, disabled.
 
-## v10 — Sponza, et deux biais que la relMSE cachait (commits c2293d4 → …)
+## v10 — Sponza, and two biases relMSE was hiding (commits c2293d4 → …)
 
-- **Sponza** (glTF Crytek, 262 k triangles, échelle 0,008) : 4 lampes (une grande au-dessus
-  de l'atrium, une petite lampe chaude dans la galerie, deux de chaque côté), une boîte
-  de 1,4 m qui se déplace, même séquence de 120 frames. Références à 16 384 spp sur GPU
-  (les petites lampes près des murs donnent des lucioles à 4 096 spp).
-- **Métrique** : la relMSE brute de Sponza est dominée par quelques lucioles (une frame
-  à 117 suffit à décider de la moyenne, écart-type entre graines ~70 %). Ajout de la
-  relMSE sans le 0,1 % de pixels les plus fautifs (pratique du path guiding) : écart-type
-  entre graines ~2 %, monotone avec le budget.
-- **Biais trouvé en regardant les images** : 20 frames après l'extinction de la grande
-  lampe, l'image KRC était 2× trop sombre et ne récupérait pas. La relMSE le récompensait
-  (avec y² + 0,01 au dénominateur, une scène sombre favorise une image trop sombre).
-  Nouvel indicateur : luminance totale image / référence. Commande `krc bias`.
-  1. **Allocation** : depuis un cache vide, KRC statique tombe à 0,68 en 4 frames
-     (SHaRC 1,00 ; KRC 100 % uniforme 0,98). Une cellule qui tire une valeur rare (queue
-     lourde : petite lampe vive, indirect) voit sa variance exploser, est aussitôt
-     sur-échantillonnée, et la valeur rare est diluée dans un n qui grandit *parce qu'elle
-     a été vue*. Une part défensive uniforme n'y fait presque rien (50 % : 0,74).
-     Correctif : variance relative d'allocation plafonnée à la médiane → 0,93 à f4,
-     0,96–0,97 ensuite.
-  2. **Événements de lampe** : à l'allumage de la petite lampe, 81 % des suspects n'ont
-     vu aucune différence sur leurs 8 chemins corrélés et gardaient 1 024 échantillons sans
-     la lampe. La sortie anticipée est exacte pour les chemins, pas pour l'espérance de la
-     cellule. Correctif : ces cellules gardent leur estimation avec un poids plafonné ;
-     poids max d'une correction 16 (au lieu de 64) ; variance après correction au moins
-     celle de l'historique.
-- Prix des correctifs : relMSE* Sponza 1,85e-2 → 2,47e-2 (l'ancienne valeur profitait du
-  biais), Cornell +8 %, scène de boîtes +13 % (4,14e-3 → 4,67e-3).
-- **Résultat Sponza 1280×720** : à temps moyen égal, KRC a 2,7 à 2,9× moins d'erreur que
-  SHaRC ; à erreur égale, il est 3,6× plus rapide. Pics : p95 9,6 ms contre 4,5 ms.
+- **Sponza** (Crytek glTF, 262 k triangles, scale 0.008): 4 lamps (a large one above the atrium, a small warm lamp in the
+  gallery, two on each side), a 1.4 m box that moves, same 120-frame sequence. References at 16,384 spp on the GPU (the
+  small lamps near the walls give fireflies at 4,096 spp).
+- **Metric**: Sponza's raw relMSE is dominated by a few fireflies (one frame out of 117 is enough to decide the mean,
+  standard deviation between seeds ~70 %). Added: relMSE without the worst 0.1 % of pixels (common practice in path
+  guiding): standard deviation between seeds ~2 %, monotonic with the budget.
+- **Bias found by looking at the images**: 20 frames after the large lamp switched off, the KRC image was 2× too dark and
+  did not recover. relMSE rewarded it (with y² + 0.01 in the denominator, a dark scene favours a too-dark image). New
+  indicator: total image luminance / reference. Command `krc bias`.
+  1. **Allocation**: from an empty cache, static KRC drops to 0.68 within 4 frames (SHaRC 1.00; KRC 100 % uniform 0.98).
+     A cell drawing a rare value (heavy tail: small bright lamp, indirect) sees its variance explode, is immediately
+     oversampled, and the rare value is diluted in an n that grows *because it was seen*. A uniform defensive share does
+     almost nothing (50 %: 0.74). Fix: relative allocation variance capped at the median → 0.93 at f4, 0.96–0.97 after.
+  2. **Lamp events**: when the small lamp switched on, 81 % of suspects saw no difference on their 8 correlated paths and
+     kept 1,024 samples without the lamp. The early exit is exact for paths, not for the cell's expectation. Fix: those
+     cells keep their estimate with a capped weight; max weight of a correction 16 (instead of 64); variance after
+     correction at least the history's.
+- Price of the fixes: Sponza relMSE* 1.85e-2 → 2.47e-2 (the old value benefited from the bias), Cornell +8 %, box scene
+  +13 % (4.14e-3 → 4.67e-3).
+- **Sponza 1280×720 result**: at equal mean time, KRC has 2.7 to 2.9× less error than SHaRC; at equal error, it is 3.6×
+  faster. Peaks: p95 9.6 ms against 4.5 ms.
 
-## v11 — caméra mobile et vrai SHaRC : l'avantage se réduit aux changements de lumière (commits 39b9eeb → …)
+## v11 — moving camera and the real SHaRC: the advantage narrows down to light changes (commits 39b9eeb → …)
 
-- **Caméra mobile** : une vue et une référence par frame ; KRC évince les cellules
-  invisibles depuis 60 frames (même règle que l'exemple SHaRC), liste libre, reconstruction
-  de la table. Il faut ~2 cellules par pixel : en marchant dans Sponza en 1280×720, KRC
-  garde jusqu'à 1,35 M cellules vivantes (~460 Mo), contre 176 Mo fixes pour SHaRC.
-- **SHaRC officiel** (NVIDIA RTXGI, v1.8.3) porté en WGSL, fonction par fonction, avec les
-  paramètres de l'exemple de NVIDIA. Validé : avec des réglages généreux, il converge vers
-  la référence (relMSE* 6,8e-4, lum 0,99, Cornell statique).
-- **Correction d'une conclusion précédente** : les « 2,7 à 2,9× moins d'erreur que SHaRC à
-  temps égal » (v9, v10) étaient mesurés contre mon cache SHaRC-like, qui traçait 1 chemin
-  par pixel avec toute la machinerie de cellules de KRC. Le vrai SHaRC met à jour 4 % des
-  pixels et coûte 0,8 à 3 ms là où KRC en coûte 4 à 22.
-- **Résultats contre le vrai SHaRC** :
-  - En statique (caméra fixe ou mobile), SHaRC est aussi bon ou meilleur que KRC pour 3 à
-    25× moins de temps GPU.
-  - Sur la séquence complète, KRC a 3 à 18× moins d'erreur, presque entièrement grâce aux
-    changements de lumière : après l'extinction de la grande lampe, SHaRC reste 7× trop
-    clair (lum 7,5) pendant des dizaines de frames, KRC est à 0,96.
-  - Le mode « éclairage réactif » de SHaRC, prévu pour ce cas, n'a pas encore été testé :
-    l'avantage de KRC sur les lampes reste à confirmer contre lui.
-- **Coût de KRC en caméra mobile** : 12,6 ms par frame à 0,25 chemin/px en 1280×720, dont
-  5,8 ms d'insertion dans la table (pierres tombales, 3,7 M insertions par frame) et 3,6 ms
-  de résolution (toutes les cellules, visibles ou non, à chaque frame). Caméra fixe : 3,9 ms.
+- **Moving camera**: one view and one reference per frame; KRC evicts cells invisible for 60 frames (same rule as the
+  SHaRC sample), free list, table rebuild. About 2 cells per pixel are needed: walking through Sponza at 1280×720, KRC
+  keeps up to 1.35 M live cells (~460 MB), against a fixed 176 MB for SHaRC.
+- **Official SHaRC** (NVIDIA RTXGI, v1.8.3) ported to WGSL, function by function, with the parameters of NVIDIA's sample.
+  Validated: with generous settings, it converges to the reference (relMSE* 6.8e-4, lum 0.99, static Cornell).
+- **Correction of an earlier conclusion**: the "2.7 to 2.9× less error than SHaRC at equal time" (v9, v10) were measured
+  against my SHaRC-like cache, which traced 1 path per pixel with all of KRC's cell machinery. The real SHaRC updates 4 %
+  of pixels and costs 0.8 to 3 ms where KRC costs 4 to 22.
+- **Results against the real SHaRC**:
+  - In static (fixed or moving camera), SHaRC is as good as or better than KRC for 3 to 25× less GPU time.
+  - Over the full sequence, KRC has 3 to 18× less error, almost entirely thanks to light changes: after the large lamp
+    switches off, SHaRC stays 7× too bright (lum 7.5) for dozens of frames, KRC is at 0.96.
+  - SHaRC's "responsive lighting" mode, meant for this case, has not been tested yet: KRC's advantage on lamps remains to
+    be confirmed against it.
+- **KRC's cost with a moving camera**: 12.6 ms per frame at 0.25 path/px at 1280×720, of which 5.8 ms of table insertion
+  (tombstones, 3.7 M insertions per frame) and 3.6 ms of resolve (every cell, visible or not, every frame). Fixed camera:
+  3.9 ms.
 
-## v12 — KRC v2 : affiner KRC pour battre le vrai SHaRC (commits 7ecba68 → …)
+## v12 — KRC v2: refining KRC to beat the real SHaRC (commits 7ecba68 → …)
 
-Tests courts (`krc duel`, `krc statique` : 480×270 ou 256², 3 graines) pour décider vite.
+Short tests (`krc duel`, `krc statique`: 480×270 or 256², 3 seeds) to decide fast.
 
-- **Coût fixe** divisé par 3 en caméra mobile (12,6 → 4,4 ms en 1280×720) : insertion sans
-  CAS inutile ni compteur partagé, liste des cellules visibles pour l'allocation et la
-  résolution, éviction par balayage.
-- **Repris de SHaRC, et utile** :
-  - rééchantillonnage du cache : un chemin ordinaire s'arrête au 1er ou 2e rebond sur une
-    cellule, en héritant de ses dépendances (les chemins corrélés restent complets) ;
-  - cellules plus grandes (8 px au lieu de 4) ;
-  - a priori d'une cellule neuve depuis le niveau voisin (caméra qui avance) ;
-  - démodulation matériau.
-- **Propre à KRC, et utile** : la qualité cible sur GPU. En statique, KRC cesse
-  d'échantillonner les cellules convergées, alors que SHaRC dépense son budget à chaque frame.
-- **Essayé, sans gain** : réutilisation des sommets, cellules de support hors champ
-  (mémoire ×3, débordement), K = 2, cache à deux résolutions, enregistrement partiel des
-  dépendances. Gardés en options désactivées.
-- **Résultat** : à temps GPU égal, KRC v2 a 2 à 4× moins d'erreur que SHaRC sur Sponza
-  (caméra fixe ou mobile), y compris contre un SHaRC réglé pour réagir vite (accumulation
-  5 frames), et 20 à 27× moins sur la Cornell box. Reste en faveur de SHaRC : le statique
-  avec caméra mobile en haute résolution (≈2×), et son coût minimal plus bas.
+- **Fixed cost** divided by 3 with a moving camera (12.6 → 4.4 ms at 1280×720): insertion without useless CAS or shared
+  counter, list of visible cells for allocation and resolve, sweeping eviction.
+- **Taken from SHaRC, and useful**:
+  - cache resampling: an ordinary path stops at the 1st or 2nd bounce on a cell, inheriting its dependencies (correlated
+    paths stay complete);
+  - larger cells (8 px instead of 4);
+  - prior of a new cell from the neighbouring level (camera moving forward);
+  - material demodulation.
+- **KRC's own, and useful**: target quality on the GPU. In static, KRC stops sampling converged cells, while SHaRC spends
+  its budget every frame.
+- **Tried, without gain**: vertex reuse, off-screen support cells (memory ×3, overflow), K = 2, two-resolution cache,
+  partial recording of dependencies. Kept as disabled options.
+- **Result**: at equal GPU time, KRC v2 has 2 to 4× less error than SHaRC on Sponza (fixed or moving camera), including
+  against a SHaRC tuned to react fast (5-frame accumulation), and 20 to 27× less on the Cornell box. Still in SHaRC's
+  favour: static with a moving camera at high resolution (≈2×), and its lower minimum cost.
 
-## v13 — Test 1 « comme en jeu » (commit d6e9be2 → …)
+## v13 — Test 1 "game-like" (commit d6e9be2 → …)
 
-- Pipeline identique pour les deux méthodes : image finale par pixel puis débruiteur commun
-  (SVGF simplifié : accumulation temporelle reprojetée, historique borné par la variance du
-  voisinage, trois filtres à-trous). KRC : direct par pixel + indirect des cellules (les
-  cellules ne stockent plus que l'indirect). SHaRC : sa passe Render officielle.
-- Sans bornage de l'historique, le débruiteur traîne une lampe éteinte 2× trop claire
-  pendant 10 frames et efface l'avantage de KRC : le bornage est indispensable (c'est ce que
-  font A-SVGF et les débruiteurs de jeu).
-- À temps GPU égal, image finale débruitée : KRC 1,4 à 3× moins d'erreur sur Sponza, 4,5 à
-  5,7× sur la Cornell box. Statique : KRC meilleur sur Cornell (2,5 à 3,6×), SHaRC un peu
-  meilleur sur Sponza (1,2 à 1,35× caméra fixe, à égalité caméra mobile).
-- **À l'œil**, après l'extinction de la grande lampe de Sponza : SHaRC trop clair mais
-  propre ; KRC plus juste en moyenne mais **taché** (chaque cellule corrigée par 8 chemins
-  corrélés garde son propre bruit) et un peu trop sombre. C'est le prochain défaut à régler.
+- Identical pipeline for both methods: per-pixel final image, then a shared denoiser (simplified SVGF: reprojected
+  temporal accumulation, history clamped by the neighbourhood's variance, three à-trous filters). KRC: per-pixel direct +
+  indirect from the cells (cells now store only the indirect). SHaRC: its official Render pass.
+- Without history clamping, the denoiser drags a switched-off lamp 2× too bright for 10 frames and erases KRC's
+  advantage: clamping is essential (this is what A-SVGF and game denoisers do).
+- At equal GPU time, final denoised image: KRC 1.4 to 3× less error on Sponza, 4.5 to 5.7× on the Cornell box. Static:
+  KRC better on Cornell (2.5 to 3.6×), SHaRC slightly better on Sponza (1.2 to 1.35× with a fixed camera, level with a
+  moving camera).
+- **To the eye**, after Sponza's large lamp switches off: SHaRC too bright but clean; KRC more correct on average but
+  **blotchy** (each cell corrected by 8 correlated paths keeps its own noise) and a bit too dark. That is the next defect
+  to fix.
 
-## v14 — corriger les défauts du test « comme en jeu »
+## v14 — fixing the defects of the "game-like" test
 
-- **Cause des taches trouvée** : en mode « indirect seulement », un chemin qui relisait une
-  cellule au rebond suivant recalculait l'éclairage direct de ce sommet avec un seul tirage
-  (la queue lourde des petites lampes). Correctif : les cellules gardent la radiance totale
-  (relue comme le fait SHaRC) et la moyenne de leur part directe ; image finale = direct par
-  pixel + (total − direct moyen). Lors d'un événement, la part directe est corrigée par les
-  mêmes chemins corrélés.
-- 32 chemins corrélés par cellule pour un événement de lampe (au lieu de 8).
-- Testés sans gain net : cellules 12 et 16 px, pas de remboursement des événements, remise
-  à zéro sur grand changement, débruiteur à 5 passages (floute trop sans arrêt sur la
-  luminance).
-- Bornage de l'historique du débruiteur : 3 écarts-types aide KRC sur Sponza mais le rend
-  plus lent sur la Cornell box ; comparaisons faites aux deux réglages, pour les deux
-  méthodes.
-- Résultat : taches nettement réduites mais pas disparues ; dérive sombre après l'extinction
-  0,74–0,81 (réglage du débruiteur) ; statique Sponza toujours légèrement en faveur de SHaRC.
+- **Cause of the blotches found**: in "indirect only" mode, a path that read a cell back at the next bounce recomputed
+  that vertex's direct lighting with a single draw (the heavy tail of small lamps). Fix: cells keep the total radiance
+  (read back the way SHaRC does) and the mean of their direct share; final image = per-pixel direct + (total − mean
+  direct). During an event, the direct share is corrected by the same correlated paths.
+- 32 correlated paths per cell for a lamp event (instead of 8).
+- Tested without a clear gain: 12 and 16 px cells, no payback of events, reset on large changes, a 5-pass denoiser (too
+  blurry without a luminance stop).
+- Denoiser history clamp: 3 standard deviations helps KRC on Sponza but makes it slower on the Cornell box; comparisons
+  made at both settings, for both methods.
+- Result: blotches clearly reduced but not gone; dark drift after switching off 0.74–0.81 (denoiser setting); static
+  Sponza still slightly in SHaRC's favour.
 
-## v15 — vitrine : Sponza texturée et brillante, vidéo comparative
+## v15 — showcase: textured, glossy Sponza, comparison video
 
-- Matériaux PBR : vraies textures de Sponza (69, 512² avec mipmaps), BRDF lambertien + GGX,
-  sol de pierre polie presque miroir, pierre satinée, métal, feuillages en masque alpha
-  (texels transparents traversés), sphère chromée qui roule, sphère dorée, ciel au-dessus
-  du toit qui « se couche », tone mapping ACES.
-- Les deux méthodes dans le même pipeline de jeu : reflet par pixel (KRC relit ses cellules
-  au point reflété, démodulées puis remultipliées par l'albédo exact : texture nette, lumière
-  sans bruit ; SHaRC suit sa règle officielle d'empreinte du lobe), débruiteur commun avec
-  canal spéculaire séparé et filtre anti-lucioles.
-- Réglages à temps égal (~5,5 ms en 960×540) : KRC 0,25 chemin/px dans les cellules + 2
-  estimations directes par pixel ; SHaRC 1 pixel mis à jour par bloc 2×2, 3 chemins/px.
-- Corrections trouvées en regardant les images : écrêtage des lucioles dans les cellules à
-  100× la moyenne (20× assombrissait), 16 chemins corrélés par cellule pour une lampe
-  (pic de 19,7 → 12,6 ms à l'allumage).
-- Faux problème écarté : la sphère miroir « mal placée » dans la référence (sa moitié basse
-  reflète le sol et s'y fond).
+- PBR materials: Sponza's real textures (69, 512² with mipmaps), Lambertian + GGX BRDF, an almost-mirror polished stone
+  floor, satin stone, metal, alpha-masked foliage (transparent texels crossed), a rolling chrome sphere, a golden sphere,
+  a sky above the roof that "sets", ACES tone mapping.
+- Both methods in the same game pipeline: per-pixel reflection (KRC reads its cells at the reflected point, demodulated
+  then multiplied back by the exact albedo: sharp texture, noise-free light; SHaRC follows its official lobe-footprint
+  rule), a shared denoiser with a separate specular channel and an anti-firefly filter.
+- Settings at equal time (~5.5 ms at 960×540): KRC 0.25 path/px into the cells + 2 direct estimates per pixel; SHaRC 1 pixel
+  updated per 2×2 block, 3 paths/px.
+- Fixes found by looking at the images: firefly clamping in cells at 100× the mean (20× darkened), 16 correlated paths
+  per cell for a lamp (switch-on peak 19.7 → 12.6 ms).
+- A false problem ruled out: the mirror sphere "misplaced" in the reference (its lower half reflects the floor and blends
+  into it).
 
-## v16 — les points blancs de KRC dans la vitrine
+## v16 — KRC's white dots in the showcase
 
-- Diagnostic par composante (`krc vitrinedbg f` : indirect des cellules seul, direct + reflet
-  seuls, image complète, avec et sans débruiteur) : les taches blanches venaient des
-  **cellules** (une cellule qui tire une valeur rare énorme devient une tache de sa taille, que
-  le débruiteur étale), pas de l'éclairage direct.
-- Erreur de ma part trouvée en route : après le test des seuils, l'écrêtage des lucioles des
-  cellules était resté désactivé (1e9) dans la vidéo précédente.
-- Correctifs : moyenne tronquée des 4 cellules d'un pixel (sans la plus claire ni la plus
-  sombre : une cellule aberrante isolée n'est jamais affichée) ; écrêtage à 100× la moyenne
-  pour une cellule mûre, 20× pour une jeune (< 64 échantillons, juste après un événement) ;
-  régularisation des chemins en mode jeu pour les deux méthodes (au-delà du premier sommet,
-  rugosité ≥ 0,3 : les caustiques diffus → miroir → petite lampe, à l'origine des taches
-  cyan sur le rideau bleu, disparaissent ; la référence reste exacte).
-- Cellules de 12 ou 16 px : pas mieux.
+- Diagnosis per component (`krc vitrinedbg f`: cell indirect only, direct + reflection only, full image, with and without
+  the denoiser): the white blotches came from the **cells** (a cell drawing a huge rare value becomes a blotch of its size,
+  which the denoiser spreads), not from direct lighting.
+- An error on my side found along the way: after testing thresholds, cell firefly clamping had stayed disabled (1e9) in
+  the previous video.
+- Fixes: truncated mean of a pixel's 4 cells (without the brightest or the darkest: an isolated aberrant cell is never
+  displayed); clamping at 100× the mean for a mature cell, 20× for a young one (< 64 samples, right after an event); path
+  regularisation in game mode for both methods (beyond the first vertex, roughness ≥ 0.3: the diffuse → mirror → small
+  lamp caustics, behind the cyan blotches on the blue curtain, disappear; the reference stays exact).
+- 12 or 16 px cells: no better.
 
-## v17 — vitrine : bannières, luminosité et miroirs
+## v17 — showcase: banners, brightness and mirrors
 
-Retours à l'œil : « le drapeau n'est pas pareil », « c'est plus sombre ». Quatre causes, toutes
-dans ce qui entoure les caches (débruiteur, reflets), trois communes aux deux méthodes :
+Feedback by eye: "the flag isn't the same", "it's darker". Four causes, all in what surrounds the caches (denoiser,
+reflections), three shared by both methods:
 
-- **Bannières floues et ternes** (les deux) : le débruiteur divise la lumière par l'albédo
-  avant de filtrer, avec un plancher à 0,05. Sur un rouge saturé (vert et bleu ≈ 0,02), le
-  plancher laissait la texture dans la lumière filtrée : bordures dorées étalées, orangées.
-  Plancher à 0,002 : bordures nettes, comme la référence.
-- **Image trop sombre** (les deux) : le ciel vu dans les surfaces brillantes n'arrivait que
-  par le tirage de lampe, presque impossible pour un lobe étroit (sol poli, sphère miroir).
-  MIS (heuristique d'équilibre) au premier sommet entre tirage de lampe et rayon de reflet :
-  luminance de 0,79 → 0,91 à f39, 0,98 à 1,05 ensuite (référence = 1).
-- **Grande tache blanche sur la sphère qui roule** (les deux, révélée par le MIS) :
-  l'historique spéculaire sans bornage traînait le reflet du ciel. Bornage 3×3 (γ = 2)
-  rétabli ; il n'assombrit plus, car avec le MIS les lampes reflétées ne sont plus des
-  valeurs rares.
-- **Points blancs dans la sphère miroir** (KRC) : les reflets hors champ (décor derrière la
-  caméra, sol caché par la sphère) étaient des chemins isolés, et le direct au point reflété
-  un seul rayon d'ombre. Nouvelle passe `krc_refl`, avant le resolve : le rayon de reflet crée
-  la cellule au point touché et la nourrit (puis 1 rayon sur 4 une fois mûre, pour suivre la
-  lumière) ; un point non métallique est lu entièrement dans sa cellule (direct compris).
-  La sphère de KRC devient nettement plus propre que celle de SHaRC.
-- Taille des cellules : 16 px au lieu de 8 dans la vitrine (moins de taches basse
-  fréquence, et moins cher) ; le temps gagné passe à 0,4 chemin/px.
-- Mesure ajoutée : PSNR des images affichées. Le relMSE* pénalise énormément un pixel clair
-  sur un fond sombre de la référence (bord d'un reflet du ciel) et presque pas un reflet
-  manquant : avec le ciel enfin présent dans les miroirs, il monte pour les deux méthodes
-  alors que l'image s'approche de la référence.
+- **Blurry, dull banners** (both): the denoiser divides the light by the albedo before filtering, with a floor at 0.05.
+  On a saturated red (green and blue ≈ 0.02), the floor left the texture in the filtered light: smeared, orange-tinted
+  golden borders. Floor at 0.002: sharp borders, like the reference.
+- **Image too dark** (both): the sky seen in glossy surfaces only arrived through lamp sampling, almost impossible for a
+  narrow lobe (polished floor, mirror sphere). MIS (balance heuristic) at the first vertex between lamp sampling and the
+  reflection ray: luminance 0.79 → 0.91 at f39, 0.98 to 1.05 afterwards (reference = 1).
+- **Large white blotch on the rolling sphere** (both, revealed by the MIS): the unclamped specular history dragged the
+  sky's reflection. 3×3 clamp (γ = 2) restored; it no longer darkens, because with MIS the reflected lamps are no longer
+  rare values.
+- **White dots in the mirror sphere** (KRC): off-screen reflections (scenery behind the camera, floor hidden by the
+  sphere) were isolated paths, and the direct light at the reflected point a single shadow ray. New `krc_refl` pass,
+  before the resolve: the reflection ray creates the cell at the hit point and feeds it (then 1 ray in 4 once mature, to
+  follow the light); a non-metallic point is read entirely from its cell (direct included). KRC's sphere becomes clearly
+  cleaner than SHaRC's.
+- Cell size: 16 px instead of 8 in the showcase (fewer low-frequency blotches, and cheaper); the time saved goes to 0.4
+  path/px.
+- Measurement added: PSNR of the displayed images. relMSE* heavily penalises a bright pixel on a dark background of the
+  reference (edge of a sky reflection) and hardly a missing reflection: with the sky finally present in mirrors, it rises
+  for both methods while the image gets closer to the reference.
 
-## v18 — dans un vrai jeu : Quake II RTX
+## v18 — in a real game: Quake II RTX
 
-- Jeu : Quake II RTX (NVIDIA, open source, path tracing Vulkan), branche `krc` de
-  `F:/Q2RTX-KRC` (données du jeu : version 1.8.1, 3 niveaux shareware). La variable de console
-  `pt_cache` choisit l'éclairage indirect : 0 jeu d'origine (un rebond tracé), 1 SHaRC (SDK
-  officiel de NVIDIA v1.8.3 en GLSL, non modifié, règles de son guide d'intégration), 2 KRC.
-  Le reste (direct, reflets, débruiteur ASVGF, matériaux) est celui du jeu.
-- KRC dans le jeu : cellules en espace monde (~16 px à l'écran, par face), allocation de
-  Neyman par pixel, liste de tâches compacte, rééchantillonnage sur les cellules mûres, et
-  chemins corrélés sur les lampes animées du jeu (le moteur garde l'intensité de la frame
-  précédente de chaque lampe : chaque échantillon évalue l'avant et l'après).
-- Débruiteur intégré (idée de Skynizz) : l'indirect est reconstruit par KRC (4 cellules voisines,
-  pondérées par leur confiance), sans historique ni filtre du débruiteur du jeu, qui
-  réaccumulait l'indirect et lui rendait le retard que les chemins corrélés venaient d'enlever.
-  Gain de temps faible ici (0,06 ms : le débruiteur filtre l'indirect à 1/3 de résolution,
-  ce qui coûte, c'est le direct et les reflets à pleine résolution).
-- Coût de KRC : 1,48 → 0,54 ms par frame en 1280×720 (une insertion par pixel, marquage sans
-  atomiques contendues, réductions par sous-groupe, liste de tâches pour les chemins) ;
-  0,1 chemin/px pour le même coût que SHaRC.
-- Pièges : la pause du moteur est ignorée en timedemo (référence capturée sur l'écran de
-  fin de démo, corrigé) ; le compilateur MSVC en français casse le suivi des en-têtes par
-  Ninja (UBO incohérent entre fichiers C, image noire) ; l'exposition automatique se mêlait à
-  la mesure du retard (figée pendant le test).
+- Game: Quake II RTX (NVIDIA, open source, Vulkan path tracing), on a `krc` branch (patches in
+  `third_party/q2rtx_krc_patches`; game data: version 1.8.1, 3 shareware levels). The console variable `pt_cache` picks
+  the indirect lighting: 0 original game (one traced bounce), 1 SHaRC (NVIDIA's official SDK v1.8.3 in GLSL, unmodified,
+  following its integration guide), 2 KRC. Everything else (direct, reflections, ASVGF denoiser, materials) is the
+  game's.
+- KRC in the game: world-space cells (~16 px on screen, per face), per-pixel Neyman allocation, compact task list,
+  resampling on mature cells, and correlated paths on the game's animated lamps (the engine keeps each lamp's intensity
+  from the previous frame: each sample evaluates before and after).
+- Integrated denoiser (Skynizz's idea): the indirect is rebuilt by KRC (4 neighbouring cells, weighted by their
+  confidence), without the game denoiser's history or filter, which re-accumulated the indirect and gave it back the lag
+  the correlated paths had just removed. Small time gain here (0.06 ms: the denoiser filters the indirect at 1/3
+  resolution; what costs is direct light and reflections at full resolution).
+- KRC's cost: 1.48 → 0.54 ms per frame at 1280×720 (one insertion per pixel, marking without contended atomics, subgroup
+  reductions, a task list for paths); 0.1 path/px for the same cost as SHaRC.
+- Pitfalls: the engine's pause is ignored in timedemo (reference captured on the demo's end screen, fixed); the
+  French-language MSVC compiler breaks Ninja's header tracking (UBO inconsistent between C files, black image); auto
+  exposure mixed into the lag measurement (frozen during the test).
 
-## v19 — reflets, débruiteur piloté par KRC, options NVIDIA
+## v19 — reflections, a KRC-driven denoiser, NVIDIA options
 
-- Lieux à reflets : `krc_view x y z pitch yaw` (commande ajoutée au code du jeu) ; repérage des
-  surfaces d'eau et de verre dans les cartes (`tools/q2rtx/find_reflective.py`) ; deux vues de
-  `demo1` : salle rouge au sol d'eau, bassin extérieur. Mesure au même instant pour toutes les
-  méthodes (jeu en pause, exposition figée) : sinon l'eau qui ondule faisait varier le PSNR de
-  3 dB d'une session à l'autre (un premier « KRC gagne » n'était que ce bruit).
-- Référence honnête : `pt_cache 3`, chemins complets à 8 rebonds sans cache, accumulés ; sans
-  profondeur de champ, avec du vrai spéculaire partout. La référence du jeu ne trace qu'un rebond.
-- Trois erreurs de KRC trouvées en comparant : (1) l'indirect fourni avec la normale pour
-  direction (faux reflets du débruiteur trop forts) ; (2) puis direction mesurée par cellule
-  (idée de l'option SH de SHaRC) ; (3) premier rebond tiré comme le jeu (loi « uniformish »),
-  la convention que sa reconstruction en harmoniques sphériques attend. Historique des cellules
-  4096 (les chemins corrélés le gardent à jour).
-- KRC ↔ débruiteur : confiance (erreur relative σ/√n de la cellule) qui décide où filtrer
-  l'indirect ; rapport « après / avant » de la lumière directe (chemins corrélés) qui rééclaire
-  l'historique du débruiteur. Essayé et retiré : jeter l'historique là où la lumière change
-  (bruit), garder l'historique rééclairé contre les gradients du débruiteur (le rapport mesuré
-  est bruité avec des lampes qui clignotent).
-- Options NVIDIA de SHaRC : pas de préréglages nommés dans le SDK ; FADE_ACCELERATION activé
-  (sans effet mesurable sur la coupure) ; accumulation 5 frames : plus réactif, même plateau.
+- Places with reflections: `krc_view x y z pitch yaw` (a command added to the game's code); water and glass surfaces
+  located in the maps (`tools/q2rtx/find_reflective.py`); two views of `demo1`: a red room with a water floor, an outdoor
+  pool. Measured at the same instant for every method (game paused, exposure frozen): otherwise the rippling water made
+  the PSNR vary by 3 dB from one session to the next (a first "KRC wins" was only that noise).
+- An honest reference: `pt_cache 3`, full 8-bounce paths without a cache, accumulated; no depth of field, with true
+  specular everywhere. The game's own reference traces only one bounce.
+- Three KRC errors found by comparing: (1) the indirect provided with the normal as its direction (the denoiser's fake
+  reflections too strong); (2) then a direction measured per cell (the idea of SHaRC's SH option); (3) first bounce drawn
+  like the game (the "uniformish" law), the convention its spherical-harmonics reconstruction expects. Cell history 4096
+  (correlated paths keep it up to date).
+- KRC ↔ denoiser: a confidence (the cell's relative error σ/√n) decides where to filter the indirect; an "after / before"
+  ratio of direct light (correlated paths) relights the denoiser's history. Tried and removed: throwing the history away
+  where light changes (noise), keeping the relit history against the denoiser's gradients (the measured ratio is noisy
+  with flickering lamps).
+- SHaRC's NVIDIA options: no named presets in the SDK; FADE_ACCELERATION on (no measurable effect on the cut); 5-frame
+  accumulation: more responsive, same plateau.
 
 ## v20 — Doom RT (PrBoom+ RT / RTGL1)
 
-- Avant de s'y lancer (demande de Skynizz) : l'indirect de RTGL1 v1.1.1 est un chemin à deux
-  rebonds par pixel, rangé en harmoniques sphériques, débruité par A-SVGF ; pas de cache. Les
-  lampes de secteur de Doom sont des lampes sphériques dont la couleur suit le niveau de lumière
-  du secteur, avec un identifiant stable : idéal pour le rééclairage exact.
-- Intégration (branche `krc` de RTGL1) : SHaRC officiel, KRC (passes RtCache0..8), mode de
-  référence ; outils pilotés par variables d'environnement : scénario de session (pause, mode,
-  coupure de lampes, exposition, affichage de débogage), captures moyennées, temps GPU par étape
-  (`tools/doomrt/bench.py`, `indirect_bias.py`).
-- **Bug de RTGL1** : son échantillon de gradient relisait l'ancienne couleur des lampes ; le
-  débruiteur ne voyait jamais un changement d'intensité (environ 100 frames de traînée dans le
-  jeu d'origine). Corrigé pour toutes les méthodes.
-- **Rééclairage exact par groupes de lampes** (idée de Skynizz) : groupe = lampes d'un secteur et
-  de même forme ; le moteur calcule le rapport « après / avant » de chaque groupe, ou le déclare
-  inconnu si ses lampes ne changent pas toutes pareil. Les cellules suivent leurs deux groupes
-  principaux ; l'historique du débruiteur est rééclairé du même rapport (direct, indirect,
-  spéculaire au point touché par le reflet), et le gradient en tient compte.
-- Défauts de KRC trouvés et corrigés : rapport indirect mesuré sur la moyenne (bruité, faisait
-  dériver l'historique du débruiteur jusqu'au blanc) ; **allocation de Neyman seule biaisée**
-  (une cellule qui n'a pas trouvé de source rare ne reçoit plus de chemins : zones sombres à
-  65 % de la référence ; 30 % uniforme + 70 % Neyman → 87 %) ; écrêtage des lucioles avec
-  réserve ; direction de la lumière par canal (les couleurs n'arrivent pas du même côté).
-- Coût ramené à celui de SHaRC : lumière directe en cache aux points des reflets (règle du cône
-  de SHaRC), vue compacte des cellules, lecture au pixel sortie du shader des rayons (passe 8 :
-  −0,3 ms, le code de KRC y prenait des registres), passe des pixels sur un pixel par bloc 2×2.
-- Pièges de mesure : convention d'émission de RTGL1 (KRC_EMIT_PHYS) ; référence moyennée après
-  l'écrêtage de l'image (remplacée par une accumulation dans le moteur) ; état de la pause qui
-  varie d'une session à l'autre (comparer seulement dans une même session).
-- Essayé sans gain : historique raccourci par le changement inexpliqué ; une seule cellule au
-  point du reflet ; historique de 32 768 échantillons.
+- Before diving in (Skynizz's request): RTGL1 v1.1.1's indirect is a two-bounce path per pixel, stored in spherical
+  harmonics, denoised by A-SVGF; no cache. Doom's sector lamps are spherical lamps whose colour follows the sector's light
+  level, with a stable identifier: ideal for exact relighting.
+- Integration (a `krc` branch of RTGL1): official SHaRC, KRC (passes RtCache0..8), reference mode; tools driven by
+  environment variables: session scenario (pause, mode, lamp cut, exposure, debug display), averaged captures, GPU time
+  per step (`tools/doomrt/bench.py`, `indirect_bias.py`).
+- **RTGL1 bug**: its gradient sample read the lamps' old colour back; the denoiser never saw an intensity change (about
+  100 frames of trail in the original game). Fixed for every method.
+- **Exact relighting by light groups** (Skynizz's idea): group = lamps of one sector with the same shape; the engine
+  computes each group's "after / before" ratio, or declares it unknown if its lamps do not all change the same way. Cells
+  follow their two main groups; the denoiser's history is relit by the same ratio (direct, indirect, specular at the
+  reflection's hit point), and the gradient takes it into account.
+- KRC defects found and fixed: indirect ratio measured on the mean (noisy, made the denoiser's history drift to white);
+  **Neyman allocation alone is biased** (a cell that has not found a rare source no longer receives paths: dark areas at
+  65 % of the reference; 30 % uniform + 70 % Neyman → 87 %); firefly clamping with a reserve; light direction per channel
+  (colours do not arrive from the same side).
+- Cost brought down to SHaRC's: direct light cached at reflection points (SHaRC's cone rule), compact view of cells,
+  per-pixel read moved out of the ray shader (pass 8: −0.3 ms, KRC's code was taking registers there), pixel pass on one
+  pixel per 2×2 block.
+- Measurement pitfalls: RTGL1's emission convention (KRC_EMIT_PHYS); a reference averaged after the image's clamping
+  (replaced by accumulation inside the engine); the pause state varies from one session to the next (compare only within
+  one session).
+- Tried without gain: history shortened by the unexplained change; a single cell at the reflection point; a 32,768-sample
+  history.
 
-## v21 — bruit, biais, premier rebond tracé ; banc NVIDIA prêt
+## v21 — noise, bias, traced first bounce; NVIDIA bench ready
 
-- **Mesure du bruit** (`tools/doomrt/noise.py` : 32 frames consécutives par méthode, scène figée) :
-  KRC n'est pas plus bruité que SHaRC (grain E1M1 0,0042 contre 0,0062) ; son retard venait du
-  **biais** (fuite de lumière autour des bords, ex. le panneau d'E1M3).
-- **Premier rebond tracé** (`KRC_HYBRID` : 0 cellules au pixel, 1 tracé là où les cellules
-  voisines se contredisent au-delà de leur incertitude, 2 toujours, comme SHaRC) ; cache de KRC lu
-  au point touché, second rebond tracé si aucune cellule (point hors champ).
-- Trois défauts trouvés en route : hasard blanc au lieu du bruit bleu de RTGL1 (4× plus de bruit
-  après le débruiteur) ; cellule réutilisée en un point par sa valeur brute (pondérée par 1/cos)
-  au lieu de la lumière reçue (évaluation de ses harmoniques avec la normale) ; groupe de lampes
-  non envoyé par le jeu traité comme éteint (noircissement durable, la frame +128 à 25 dB).
-- Résultat, mode 2 (E1M1 / E1M3) : biais 54,9 / 54,0 contre SHaRC 54,8 / 54,0, grain plus faible
-  sur E1M1 ; réaction toujours meilleure (+2 à +4 dB jusqu'à +64). Mais E1M2 recule (41,5 contre
-  47,5 en mode 0), fin de convergence sous SHaRC (47,4 contre 50,0 à +250) et +0,7 ms GPU.
-  Le meilleur mode dépend de la carte : à trancher.
-- Banc de référence : le SDK RTXGI de NVIDIA (path tracer d'exemple, SHaRC et NRC intégrés par
-  NVIDIA, scène Bistro fournie) compile et tourne ici en DirectX 12 (F:\rtxgi\sdk).
+- **Noise measurement** (`tools/doomrt/noise.py`: 32 consecutive frames per method, frozen scene): KRC is not noisier than
+  SHaRC (E1M1 grain 0.0042 against 0.0062); its lag came from **bias** (light leaking around edges, e.g. E1M3's panel).
+- **Traced first bounce** (`KRC_HYBRID`: 0 cells at the pixel, 1 traced where neighbouring cells contradict each other
+  beyond their uncertainty, 2 always, like SHaRC); KRC's cache read at the hit point, second bounce traced if there is no
+  cell (off-screen point).
+- Three defects found along the way: white noise instead of RTGL1's blue noise (4× more noise after the denoiser); a cell
+  reused at a point by its raw value (weighted by 1/cos) instead of the received light (evaluating its harmonics with the
+  normal); a lamp group not sent by the game treated as off (lasting darkening, frame +128 at 25 dB).
+- Result, mode 2 (E1M1 / E1M3): bias 54.9 / 54.0 against SHaRC 54.8 / 54.0, lower grain on E1M1; reaction still better (+2
+  to +4 dB up to +64). But E1M2 regresses (41.5 against 47.5 in mode 0), end of convergence below SHaRC (47.4 against 50.0
+  at +250) and +0.7 ms GPU. The best mode depends on the map: to be decided.
+- Reference bench: NVIDIA's RTXGI SDK (path tracer sample, SHaRC and NRC integrated by NVIDIA, Bistro scene provided)
+  builds and runs here in DirectX 12.
 
-## v22 — banc NVIDIA (RTXGI), ꟻLIP, cellules adaptatives, guidage
+## v22 — NVIDIA bench (RTXGI), ꟻLIP, adaptive cells, guiding
 
-- **Banc de référence** : path tracer d'exemple du SDK RTXGI de NVIDIA (branche `krc` de
-  F:\rtxgi\sdk), SHaRC et NRC intégrés par NVIDIA, scènes Bistro, salon, salle de bains. Mode sans
-  fenêtre visible ni prise de focus (Donut patché, `KRC_HIDDEN`), scénario par frame, captures HDR,
-  temps GPU (`tools/rtxgi/`). Piège : la référence accumulée avec jitter contre des frames NRD sans
-  jitter (toutes les arêtes diffèrent) ; tout est maintenant au même échantillonnage.
-- **ꟻLIP** (NVlabs/flip) en LDR et HDR, moyen sur 8 frames débruitées ; plus la variance brute avant
-  NRD et le biais (moyenne de 512 frames).
-- **KRC-A, cellules adaptatives** (idée de Skynizz) sur la table de SHaRC : mère deux fois plus grande
-  par cellule fine, variance d'une frame à l'autre, rétrécissement de James-Stein décidé à la
-  résolution et lissé. Biais du cache réduit (salon : ꟻLIP 0,066 contre 0,074, relMSE −12 %) et
-  bruit brut un peu plus faible ; mais la frame débruitée par NRD est moins bonne (0,082 contre
-  0,072) : NRD converge vers un résultat différent, cause encore inconnue. +0,3 ms.
-- **Guidage du premier rebond** (lobe de von Mises-Fisher appris par cellule, mélange défensif
-  50 %, MIS) : sans effet sur le bruit dans ces scènes (éclairage large, pas de petite source
-  rare), +2 à +3 ms (atomiques 64 bits). Résultat négatif ; à retenter là où la queue lourde existe
-  (Doom, Bistro de nuit) et en moins cher.
-- **État de l'art** (docs/ETAT_DE_L_ART.md) : le guidage en table de hachage existe déjà (Real-Time
-  Markov Chain Path Guiding, I3D 2025) ; le cache comme variable de contrôle avec correction sans
-  biais aussi (Neural Two-Level Monte Carlo, 2025). Restent propres à KRC : chemins corrélés exacts,
-  rééclairage par groupes de lampes et de l'historique du débruiteur, guide figé pendant un
-  événement, taille des cellules par test statistique.
+- **Reference bench**: the path tracer sample of NVIDIA's RTXGI SDK (on a `krc` branch), SHaRC and NRC integrated by
+  NVIDIA, Bistro, living-room and bathroom scenes. Mode without a visible window or focus grab (patched Donut,
+  `KRC_HIDDEN`), per-frame scenario, HDR captures, GPU time (`tools/rtxgi/`). Pitfall: the reference accumulated with
+  jitter against NRD frames without jitter (every edge differs); everything now uses the same sampling.
+- **ꟻLIP** (NVlabs/flip) in LDR and HDR, averaged over 8 denoised frames; plus the raw variance before NRD and the bias
+  (mean of 512 frames).
+- **KRC-A, adaptive cells** (Skynizz's idea) on SHaRC's table: a parent twice as large per fine cell, frame-to-frame
+  variance, James-Stein shrinkage decided at resolve and smoothed. Cache bias reduced (living room: ꟻLIP 0.066 against
+  0.074, relMSE −12 %) and raw noise slightly lower; but the frame denoised by NRD is worse (0.082 against 0.072): NRD
+  converges to a different result, cause still unknown. +0.3 ms.
+- **First-bounce guiding** (a von Mises-Fisher lobe learned per cell, 50 % defensive mixture, MIS): no effect on noise in
+  these scenes (broad lighting, no small rare source), +2 to +3 ms (64-bit atomics). Negative result; to retry where the
+  heavy tail exists (Doom, Bistro at night) and cheaper.
+- **State of the art** (docs/STATE_OF_THE_ART.md): guiding in a hash table already exists (Real-Time Markov Chain Path
+  Guiding, I3D 2025); so does the cache as a control variate with an unbiased correction (Neural Two-Level Monte Carlo,
+  2025). Still KRC's own: exact correlated paths, relighting by light groups and of the denoiser's history, a guide frozen
+  during an event, cell size by statistical test.
 
-## v23 — banc NVIDIA : NRD compris, rééclairage exact, bibliothèque KRC
+## v23 — NVIDIA bench: NRD understood, exact relighting, KRC library
 
-- **NRD et KRC-A** : KRC-A sans lecture de la mère redonne l'image de SHaRC ; mais la cause n'est
-  pas la mère : le NRD de l'exemple perd 9 à 15 % d'énergie hors ciel, même en path tracing pur,
-  et SHaRC (+5 % hors ciel) le compense. À exposition égale, KRC-A égale ou bat SHaRC.
-  Anti-lucioles de REBLUR : sans rapport (bascule `nrdaf`).
-- **Rééclairage exact dans le banc NVIDIA** (lampes de la scène en 3 groupes suivis) : parts des
-  groupes par cellule, suivies le long des chemins de SHaRC avec ses poids (y compris quand un
-  sommet relit le cache) ; passe `krcRelight` avant la mise à jour quand le moteur connaît le
-  rapport. Image brute juste dès la frame 0 (salon, Bistro de nuit).
-- **Historique de NRD** : la confiance d'historique de REBLUR ne suffit pas (historique ramené à
-  une frame, pas à zéro). Ce qui marche : diviser l'entrée de NRD par le produit S des facteurs de
-  la cellule du pixel et remultiplier sa sortie ; son historique ressort rééclairé sans y toucher.
-  S lissé à l'écran (sinon les cellules se dessinent). Salon, coupure du soleil : ꟻLIP 0,094 dès
-  la frame 0 contre 0,113 pour SHaRC, qui ne rattrape qu'à +128.
-- **Bistro de nuit** : 4 lampes ajoutées par le banc (`lampadd`). Piège : l'exemple ne tire que
-  la lampe 0 en lumière directe (`targetLight = 0`). Après NRD, gain faible et S assombrit 6 % de
-  trop (rapport par cellule) : prochain correctif, rapport par pixel de la lumière directe.
-- **Coût** : +2 ms au premier essai, ramené à +0,01–0,05 ms : les passes par entrée remettaient à
-  zéro les 4 M d'entrées de la table à chaque frame ; elles ne nettoient plus qu'à l'éviction
-  (même correctif pour KRC-A : +0,24 ms).
-- **Bibliothèque** : `Libraries/Krc/include/KrcRelight.h` (GPU, conventions de SHaRC) et
-  `KrcRelightHost.h` (CPU) ; l'exemple les utilise ; copie dans `krc_sdk/include`, mode d'emploi
-  docs/INTEGRATION.md. Analyse des prochaines étapes : FEUILLE_DE_ROUTE, « Analyse (octobre 2026) ».
+- **NRD and KRC-A**: KRC-A without reading the parent gives SHaRC's image back; but the parent is not the cause: the
+  sample's NRD loses 9 to 15 % of energy off-sky, even in pure path tracing, and SHaRC (+5 % off-sky) compensates. At
+  equal exposure, KRC-A equals or beats SHaRC. REBLUR's anti-firefly: unrelated (toggle `nrdaf`).
+- **Exact relighting in the NVIDIA bench** (the scene's lamps in 3 tracked groups): group shares per cell, tracked along
+  SHaRC's paths with its weights (including when a vertex reads the cache back); a `krcRelight` pass before the update
+  when the engine knows the ratio. Correct raw image from frame 0 (living room, Bistro at night).
+- **NRD's history**: REBLUR's history confidence is not enough (history brought back to one frame, not to zero). What
+  works: divide NRD's input by the product S of the pixel's cell factors and multiply its output back; its history comes
+  out relit without touching it. S smoothed on screen (otherwise the cells show). Living room, sun cut: ꟻLIP 0.094 from
+  frame 0 against 0.113 for SHaRC, which only catches up at +128.
+- **Bistro at night**: 4 lamps added by the bench (`lampadd`). Pitfall: the sample samples only lamp 0 for direct light
+  (`targetLight = 0`). After NRD, small gain and S darkens 6 % too much (per-cell ratio): next fix, a per-pixel ratio of
+  direct light.
+- **Cost**: +2 ms at the first try, brought down to +0.01–0.05 ms: the per-entry passes cleared the table's 4 M entries
+  every frame; they now clean only at eviction (same fix for KRC-A: +0.24 ms).
+- **Library**: `Libraries/Krc/include/KrcRelight.h` (GPU, SHaRC's conventions) and `KrcRelightHost.h` (CPU); the sample
+  uses them; copied into `krc_sdk/include`, guide in docs/INTEGRATION.md. Analysis of the next steps: ROADMAP, "Analysis
+  (October 2026)".
 
-## v24 — vers un effet ReShade : labo de l'éclairage global à l'écran
+## v24 — towards a ReShade effect: a screen-space global illumination lab
 
-- Question de Skynizz : un système universel qui ajoute le ray tracing à n'importe quel jeu, même
-  DirectX 12 (Red Dead Redemption 2), avec un menu ImGui. Réponse : impossible en vrai path
-  tracing (un jeu DX12 ne donne ni sa géométrie, ni ses matériaux, ni ses lampes ; RTX Remix se
-  limite pour cette raison à DX8/9). Possible à l'écran via ReShade (DX9 à DX12, Vulkan, OpenGL,
-  menu ImGui intégré), qui ne voit que l'image et la profondeur.
-- Labo dans le banc NVIDIA (`tools/rtxgi/ssgi.py`, `Shaders/KrcScreenGI.hlsl`) : le « jeu » est la
-  lumière directe seule (`direct=1`, G-buffer écrit), l'effet ajoute l'indirect, référence = path
-  tracing complet. Effet : masque de visibilité (Therrien et al. 2023), mesure de GTAO dans la
-  tranche, accumulation temporelle reprojetée, à-trous, radiance de la frame précédente (plusieurs
-  rebonds). Ajout propre : le **ciel vu à l'écran** éclaire les directions non masquées (à l'infini,
-  la direction depuis le pixel est celle de la caméra, dans le plan de la tranche).
-- Premiers chiffres (1280×720) : salon (70 % d'indirect venant du ciel, en partie hors champ)
-  ꟻLIP 0,563 → 0,513 avec G-buffer, 0,547 avec la seule image ; Bistro de jour 0,145 → 0,133.
-  Coût 2 à 3 ms en pleine résolution : à passer en demi-résolution.
-- Limite de fond : la lumière hors champ ; c'est là que viendrait le cache en espace monde de KRC.
+- Skynizz's question: a universal system that adds ray tracing to any game, even DirectX 12 (Red Dead Redemption 2), with
+  an ImGui menu. Answer: impossible as true path tracing (a DX12 game gives neither its geometry, nor its materials, nor
+  its lamps; RTX Remix limits itself to DX8/9 for that reason). Possible on screen through ReShade (DX9 to DX12, Vulkan,
+  OpenGL, built-in ImGui menu), which only sees the image and the depth. (This later became URTI, which does capture the
+  geometry: <https://github.com/Skynizz/URTI>.)
+- Lab in the NVIDIA bench (`tools/rtxgi/ssgi.py`, `Shaders/KrcScreenGI.hlsl`): the "game" is direct light only
+  (`direct=1`, G-buffer written), the effect adds the indirect, reference = full path tracing. Effect: visibility mask
+  (Therrien et al. 2023), GTAO measurement within the slice, reprojected temporal accumulation, à-trous, previous frame's
+  radiance (several bounces). Our own addition: the **sky seen on screen** lights the unmasked directions (at infinity,
+  the direction from the pixel is the camera's, in the slice's plane).
+- First numbers (1280×720): living room (70 % of the indirect comes from the sky, partly off screen) ꟻLIP 0.563 → 0.513
+  with the G-buffer, 0.547 with the image alone; Bistro by day 0.145 → 0.133. Cost 2 to 3 ms at full resolution: to move
+  to half resolution.
+- Fundamental limit: off-screen light; that is where KRC's world-space cache would come in.
