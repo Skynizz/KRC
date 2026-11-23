@@ -42,7 +42,7 @@ def analyse(data):
     for i in range(0, len(faces), 20):
         plane, side, first, num, tex = struct.unpack_from('<HhiHh', faces, i)
         flags, name = texinfo[tex]
-        kind = 'eau' if flags & SURF_WARP else ('verre' if flags & (SURF_TRANS33 | SURF_TRANS66) else None)
+        kind = 'water' if flags & SURF_WARP else ('glass' if flags & (SURF_TRANS33 | SURF_TRANS66) else None)
         if kind is None:
             continue
         pts = []
@@ -80,8 +80,8 @@ def main():
         data = f.read(s)
         print(f'== {m}')
         for area, kind, name, c, n, count in analyse(data)[:8]:
-            print(f'  {kind:5s} {name:24s} aire {area:9.0f}  centre ({c[0]:.0f}, {c[1]:.0f}, {c[2]:.0f})  '
-                  f'normale ({n[0]:.2f}, {n[1]:.2f}, {n[2]:.2f})  {count} faces')
+            print(f'  {kind:5s} {name:24s} area {area:9.0f}  centre ({c[0]:.0f}, {c[1]:.0f}, {c[2]:.0f})  '
+                  f'normal ({n[0]:.2f}, {n[1]:.2f}, {n[2]:.2f})  {count} faces')
 
 
 if __name__ == '__main__':

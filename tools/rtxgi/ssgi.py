@@ -24,7 +24,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 VARIANTS = {
     'game': ['ssgi=0'],                                             # no indirect lighting
     'ideal': ['ssgi=1', 'ssginormals=1', 'ssgialbedo=1'],           # G-buffer normals and albedo
-    'reshade': ['ssgi=1', 'ssginormals=0', 'ssgialbedo=0'],         # seulement couleur + profondeur
+    'reshade': ['ssgi=1', 'ssginormals=0', 'ssgialbedo=0'],         # colour + depth only
 }
 LAST = 8
 

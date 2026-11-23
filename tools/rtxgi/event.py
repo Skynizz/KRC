@@ -74,7 +74,7 @@ def main():
 
     L = lambda x: x[..., :3] @ np.array([0.2126, 0.7152, 0.0722])
     refA, refB = img.read_pfm(f'{out}/refA.pfm'), img.read_pfm(f'{out}/refB.pfm')
-    mask = L(refA) < 5.0  # hors ciel
+    mask = L(refA) < 5.0  # outside the sky
     lb = L(refB)[mask].mean()
     print(f'luminance change outside the sky A -> B: {L(refA)[mask].mean() / lb:.3f}')
     dst = os.path.join(ROOT, 'results', 'rtxgi', a.name)
