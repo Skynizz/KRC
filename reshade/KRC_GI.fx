@@ -1,20 +1,20 @@
 /*
- * KRC GI : éclairage global à l'écran pour ReShade (projet KRC, F:\NewrAYTRACING).
+ * KRC GI: screen-space global illumination for ReShade (KRC project).
  *
- * Ce qui est fait :
- *  - tracé par masque de visibilité (Therrien, Levesque, Gilet, « Screen Space Indirect Lighting
- *    with Visibility Bitmask », 2023), en demi-résolution : chaque point touché dans la profondeur
- *    masque un intervalle d'angles (épaisseur supposée) et les secteurs nouvellement masqués
- *    reçoivent sa lumière ; la lumière de la frame précédente donne plusieurs rebonds ;
- *  - mode KRC : le ciel vu à l'écran éclaire les directions restées libres (à l'infini, la
- *    direction depuis le point est celle de la caméra, dans le plan de la tranche) ;
- *  - accumulation dans le temps avec rejet par la profondeur, filtre à-trous, remontée en pleine
- *    résolution guidée par la profondeur.
+ * What it does:
+ *  - visibility-bitmask tracing (Therrien, Levesque, Gilet, "Screen Space Indirect Lighting
+ *    with Visibility Bitmask", 2023), at half resolution: each point hit in the depth buffer
+ *    masks an interval of angles (assumed thickness) and the newly masked sectors
+ *    receive its light; the previous frame's light gives several bounces;
+ *  - KRC mode: the sky seen on screen lights the directions left open (at infinity, the
+ *    direction from the point is the camera's, in the plane of the slice);
+ *  - temporal accumulation with depth rejection, à-trous filter, depth-guided upsampling to full
+ *    resolution.
  *
- * Touche F8 : effet coupé / actif, en direct. Écran partagé : gauche sans, droite avec.
- * Profondeur : réglages globaux de ReShade (RESHADE_DEPTH_INPUT_IS_REVERSED, etc.). Si l'écran
- * reste plat, vérifier dans l'onglet « Add-ons > Generic Depth » que la bonne profondeur est prise
- * et que l'anticrénelage MSAA du jeu est coupé.
+ * F8 key: effect off / on, live. Split screen: left without, right with.
+ * Depth: ReShade's global settings (RESHADE_DEPTH_INPUT_IS_REVERSED, etc.). If the image
+ * stays flat, check in the "Add-ons > Generic Depth" tab that the right depth buffer is used
+ * and that the game's MSAA anti-aliasing is off.
  */
 
 #include "ReShade.fxh"
@@ -26,71 +26,71 @@
 uniform int KrcMode <
     ui_type = "combo";
     ui_label = "Mode";
-    ui_items = "Coupé\0Classique (écran seul)\0KRC (écran + ciel vu)\0";
-    ui_tooltip = "Classique : comme les effets d'éclairage global à l'écran habituels.\nKRC : le ciel visible à l'écran éclaire aussi les surfaces qui le voient.";
+    ui_items = "Off\0Classic (screen only)\0KRC (screen + visible sky)\0";
+    ui_tooltip = "Classic: like the usual screen-space global illumination effects.\nKRC: the sky visible on screen also lights the surfaces that see it.";
 > = 2;
 
 uniform float KrcIntensity <
     ui_type = "slider"; ui_min = 0.0; ui_max = 4.0; ui_step = 0.01;
-    ui_label = "Intensité de l'indirect";
+    ui_label = "Indirect strength";
 > = 1.0;
 
 uniform float KrcAO <
     ui_type = "slider"; ui_min = 0.0; ui_max = 1.0; ui_step = 0.01;
-    ui_label = "Ombres de contact";
-    ui_tooltip = "Assombrit l'image là où peu de directions sont libres.";
+    ui_label = "Contact shadows";
+    ui_tooltip = "Darkens the image where few directions are open.";
 > = 0.35;
 
 uniform float KrcRadius <
     ui_type = "slider"; ui_min = 0.2; ui_max = 20.0; ui_step = 0.1;
-    ui_label = "Rayon (mètres environ)";
+    ui_label = "Radius (approx. metres)";
 > = 3.0;
 
 uniform float KrcThickness <
     ui_type = "slider"; ui_min = 0.05; ui_max = 3.0; ui_step = 0.01;
-    ui_label = "Épaisseur supposée des objets";
+    ui_label = "Assumed object thickness";
 > = 0.5;
 
 uniform int KrcSlices <
     ui_type = "slider"; ui_min = 1; ui_max = 4;
-    ui_label = "Qualité : directions par pixel";
+    ui_label = "Quality: directions per pixel";
 > = 2;
 
 uniform int KrcSteps <
     ui_type = "slider"; ui_min = 4; ui_max = 24;
-    ui_label = "Qualité : pas par direction";
+    ui_label = "Quality: steps per direction";
 > = 10;
 
 uniform int KrcHistory <
     ui_type = "slider"; ui_min = 1; ui_max = 32;
-    ui_label = "Lissage dans le temps (frames)";
-    ui_tooltip = "Plus haut : moins de bruit, plus de traînée quand la caméra bouge.";
+    ui_label = "Temporal smoothing (frames)";
+    ui_tooltip = "Higher: less noise, more trailing when the camera moves.";
 > = 12;
 
 uniform float KrcFov <
     ui_type = "slider"; ui_min = 30.0; ui_max = 120.0; ui_step = 0.5;
-    ui_label = "Champ de vision vertical du jeu (degrés)";
+    ui_label = "Game vertical field of view (degrees)";
 > = 55.0;
 
 uniform float KrcHdr <
     ui_type = "slider"; ui_min = 0.0; ui_max = 1.0; ui_step = 0.01;
-    ui_label = "Reconstruction des hautes lumières";
-    ui_tooltip = "L'image du jeu est déjà compressée : rend aux zones claires (ciel, soleil) un peu de leur force.";
+    ui_label = "Highlight reconstruction";
+    ui_tooltip = "The game image is already compressed: gives bright areas (sky, sun) back some of their strength.";
 > = 0.6;
 
 uniform float KrcSaturation <
     ui_type = "slider"; ui_min = 0.0; ui_max = 2.0; ui_step = 0.01;
-    ui_label = "Couleur des rebonds";
+    ui_label = "Bounce colour";
 > = 1.0;
 
 uniform bool KrcSplit <
-    ui_label = "Écran partagé (gauche sans, droite avec)";
+    ui_label = "Split screen (left without, right with)";
 > = false;
 
 uniform int KrcDebug <
     ui_type = "combo";
-    ui_label = "Vue de contrôle";
-    ui_items = "Image\0Indirect seul\0Ombres de contact\0Normales\0Profondeur\0";
+    ui_label = "Debug view";
+    ui_items = "Image\0Indirect only\0Contact shadows\0Normals\0Depth\0";
 > = 0;
 
 uniform bool KrcToggle < source = "key"; keycode = 0x77; mode = "toggle"; >; // F8
@@ -124,7 +124,7 @@ sampler sKrcPrevDepth { Texture = texKrcPrevDepth; KRC_POINT; };
 sampler sKrcColor     { Texture = ReShade::BackBufferTex; SRGBTexture = true; };
 
 // ------------------------------------------------------------------------------------------------
-// Outils
+// Helpers
 // ------------------------------------------------------------------------------------------------
 
 bool KrcActive()
@@ -148,7 +148,7 @@ float2 KrcTan()
     return float2(ty * BUFFER_WIDTH * BUFFER_RCP_HEIGHT, ty);
 }
 
-// position en espace vue (x droite, y haut, z devant), en mètres environ
+// view-space position (x right, y up, z forward), in approximate metres
 float3 KrcViewPos(float2 uv, float d)
 {
     const float z = d * RESHADE_DEPTH_LINEARIZATION_FAR_PLANE;
@@ -160,7 +160,7 @@ float3 KrcViewPosAt(float2 uv)
     return KrcViewPos(uv, KrcDepth(uv));
 }
 
-// normale déduite de la profondeur : la plus petite des différences de chaque côté (arêtes nettes)
+// normal derived from depth: the smaller of the differences on each side (sharp edges)
 float3 KrcNormal(float2 uv, float3 P)
 {
     const float2 px = BUFFER_PIXEL_SIZE;
@@ -174,8 +174,8 @@ float3 KrcNormal(float2 uv, float3 P)
     return n;
 }
 
-// image du jeu (sRGB lue en linéaire) vers une radiance approchée : les hautes lumières compressées
-// par le jeu retrouvent un peu de leur force
+// game image (sRGB read as linear) to an approximate radiance: highlights compressed
+// by the game get back some of their strength
 float3 KrcRadiance(float3 c)
 {
     const float l = dot(c, float3(0.2126, 0.7152, 0.0722));
@@ -195,7 +195,7 @@ uint KrcPopcount(uint v)
     return (((v + (v >> 4)) & 0x0F0F0F0Fu) * 0x01010101u) >> 24;
 }
 
-// ∫ cos(x − n) |sin x| dx de n − π/2 à t (mesure de GTAO dans la tranche)
+// ∫ cos(x − n) |sin x| dx from n − π/2 to t (GTAO measure in the slice)
 float KrcSliceMeasure(float t, float n)
 {
     const float sn = sin(n);
@@ -301,7 +301,7 @@ float4 PS_Trace(float4 pos : SV_Position, float2 uv : TEXCOORD) : SV_Target
                 const uint fresh = mask & ~occluded;
                 if (fresh != 0u)
                 {
-                    // le point touché n'éclaire que s'il fait face (normale à deux prises, moins chère)
+                    // the hit point only lights if it faces us (two-tap normal, cheaper)
                     const float3 Pqr = KrcViewPosAt(quv + float2(BUFFER_RCP_WIDTH, 0));
                     const float3 Pqd = KrcViewPosAt(quv + float2(0, BUFFER_RCP_HEIGHT));
                     float3 Nq = normalize(cross(Pqr - Pq, Pqd - Pq));
@@ -334,8 +334,8 @@ float4 PS_Temporal(float4 pos : SV_Position, float2 uv : TEXCOORD) : SV_Target
     const float prevD = tex2D(sKrcPrevDepth, uv).x;
     float4 history = tex2D(sKrcHistPrev, uv);
 
-    // sans vecteurs de mouvement : historique gardé là où la profondeur n'a pas bougé, et ramené dans
-    // l'enveloppe des voisins actuels (limite la traînée quand la caméra bouge)
+    // no motion vectors: history kept where the depth has not moved, and clamped to the
+    // envelope of the current neighbours (limits trailing when the camera moves)
     float frames = history.w;
     if (KrcIsSky(d) || abs(prevD - d) > 0.02 * d)
         frames = 0.0;
@@ -353,7 +353,7 @@ float4 PS_Temporal(float4 pos : SV_Position, float2 uv : TEXCOORD) : SV_Target
     history.rgb = clamp(history.rgb, lo - spread, hi + spread);
     frames = min(frames + 1.0, float(KrcHistory));
     const float a = 1.0 / frames;
-    // la visibilité se moyenne à part, sans compter les frames dans .w : on la reprend du courant
+    // visibility is averaged separately, without counting frames in .w: it is taken from the current one
     return float4(lerp(history.rgb, current.rgb, a), frames);
 }
 
@@ -398,12 +398,12 @@ float4 PS_FilterA(float4 pos : SV_Position, float2 uv : TEXCOORD) : SV_Target
 float4 PS_FilterB(float4 pos : SV_Position, float2 uv : TEXCOORD) : SV_Target
 {
     const float4 r = KrcAtrous(sKrcFiltA, uv, 2.0);
-    return float4(r.rgb, tex2D(sKrcRaw, uv).a); // visibilité de la frame, pour les ombres de contact
+    return float4(r.rgb, tex2D(sKrcRaw, uv).a); // visibility of the frame, for contact shadows
 }
 
 float3 KrcAlbedo(float3 c)
 {
-    // l'image du jeu contient déjà la lumière : on n'en garde que la teinte, à clarté moyenne
+    // the game image already contains the light: only its tint is kept, at mean brightness
     const float m = max(max(c.r, c.g), max(c.b, 1e-4));
     const float3 hue = c / m;
     const float l = dot(hue, float3(0.2126, 0.7152, 0.0722));
@@ -419,7 +419,7 @@ float4 PS_Composite(float4 pos : SV_Position, float2 uv : TEXCOORD) : SV_Target
     if (KrcIsSky(d))
         return float4(KrcDebug == 0 ? color : float3(0, 0, 0), 1.0);
 
-    // remontée en pleine résolution guidée par la profondeur (4 voisins de la demi-résolution)
+    // depth-guided upsampling to full resolution (4 neighbours from half resolution)
     const float2 halfTexel = 2.0 * BUFFER_PIXEL_SIZE;
     const float2 base = (floor(uv / halfTexel - 0.5) + 0.5) * halfTexel;
     float4 sum = 0;
@@ -451,7 +451,7 @@ float4 PS_Composite(float4 pos : SV_Position, float2 uv : TEXCOORD) : SV_Target
     return float4(result, 1.0);
 }
 
-// mémoire pour la frame suivante : radiance (plusieurs rebonds) et profondeur, en demi-résolution
+// memory for the next frame: radiance (several bounces) and depth, at half resolution
 float4 PS_StoreRadiance(float4 pos : SV_Position, float2 uv : TEXCOORD) : SV_Target
 {
     return float4(KrcRadianceFromScreen(uv), 1.0);
@@ -463,8 +463,8 @@ float PS_StoreDepth(float4 pos : SV_Position, float2 uv : TEXCOORD) : SV_Target
 }
 
 technique KRC_GI <
-    ui_label = "KRC GI (éclairage global)";
-    ui_tooltip = "Éclairage indirect et ombres de contact calculés à l'écran.\nF8 : coupé / actif.";
+    ui_label = "KRC GI (global illumination)";
+    ui_tooltip = "Indirect lighting and contact shadows computed on screen.\nF8: off / on.";
 >
 {
     pass Trace          { VertexShader = PostProcessVS; PixelShader = PS_Trace;         RenderTarget = texKrcRaw; }

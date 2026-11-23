@@ -1,33 +1,33 @@
 /*
- * KRC : rééclairage exact par groupes de lampes, en extension de SHaRC (v1.8.x).
+ * KRC: exact relighting by lamp groups, as an extension of SHaRC (v1.8.x).
  *
- * Indépendant du moteur : les tampons et réglages passent par KrcRelightParameters, comme SHaRC
- * avec SharcParameters. À inclure après SharcCommon.h. Mode d'emploi : docs/INTEGRATION.md.
+ * Engine-independent: buffers and settings go through KrcRelightParameters, like SHaRC
+ * with SharcParameters. Include after SharcCommon.h. How to use it: docs/INTEGRATION.md.
  *
- * Principe. Chaque cellule de SHaRC apprend la part de sa lumière qui vient de chaque groupe de
- * lampes (3 groupes suivis ; le reste, ciel et émissifs, est fixe). La lumière directe d'un sommet
- * est rangée dans le groupe de la lampe tirée et remonte vers les cellules précédentes avec les
- * poids de SHaRC ; un sommet qui relit le cache apporte les parts de sa cellule. Quand le moteur
- * change l'intensité d'un groupe d'un rapport connu r (« après / avant »), KrcRelightEntry
- * multiplie la radiance de chaque cellule par k = 1 + Σ f_g (r_g − 1) avant le tracé de la frame :
- * le cache passe d'un coup au nouvel éclairage, sans bruit ni retard. Exact pour la luminance ; la
- * couleur est approchée si les groupes n'ont pas la même teinte.
+ * Principle. Each SHaRC cell learns the share of its light that comes from each lamp group
+ * (3 tracked groups; the rest, sky and emissives, is fixed). The direct light of a vertex
+ * is stored in the group of the sampled lamp and flows back to the previous cells with SHaRC's
+ * weights; a vertex that reads the cache brings its cell's shares. When the engine
+ * changes a group's intensity by a known ratio r ("after / before"), KrcRelightEntry
+ * multiplies each cell's radiance by k = 1 + Σ f_g (r_g − 1) before the frame is traced:
+ * the cache jumps to the new lighting at once, with no noise and no lag. Exact for luminance; the
+ * colour is approximate if the groups do not share the same tint.
  *
- * Le produit S des facteurs k de chaque cellule sert au débruiteur : son entrée est divisée par S
- * (lissé à l'écran) et sa sortie remultipliée par S, donc son historique ressort rééclairé alors
- * qu'il n'y a pas accès (NRD, DLSS RR…).
+ * The product S of each cell's factors k serves the denoiser: its input is divided by S
+ * (smoothed on screen) and its output multiplied back by S, so its history comes out relit even
+ * though it has no access to it (NRD, DLSS RR…).
  *
- * Tampons, une entrée par entrée de la table de SHaRC, remis à zéro avec elle :
- *   groupAccumulationBuffer  uint4  sommes de la frame en virgule fixe (xyz groupes, w total)
- *   groupBuffer              float4 moyennes lissées (même rangement)
- *   factorBuffer             float2 x : facteur de la frame, y : produit S (0 vaut 1)
+ * Buffers, one entry per entry of SHaRC's table, reset along with it:
+ *   groupAccumulationBuffer  uint4  fixed-point sums of the frame (xyz groups, w total)
+ *   groupBuffer              float4 smoothed means (same layout)
+ *   factorBuffer             float2 x: factor of the frame, y: product S (0 means 1)
  */
 
 #ifndef KRC_RELIGHT_H
 #define KRC_RELIGHT_H
 
 #ifndef KRC_GROUP_SCALE
-#define KRC_GROUP_SCALE 1e3f // virgule fixe des sommes (comme SHARC_RADIANCE_SCALE)
+#define KRC_GROUP_SCALE 1e3f // fixed point of the sums (like SHARC_RADIANCE_SCALE)
 #endif
 
 struct KrcRelightParameters
@@ -35,8 +35,8 @@ struct KrcRelightParameters
     RW_STRUCTURED_BUFFER(groupAccumulationBuffer, uint4);
     RW_STRUCTURED_BUFFER(groupBuffer, float4);
     RW_STRUCTURED_BUFFER(factorBuffer, float2);
-    uint lightGroups;   // groupe de la lampe i aux bits 2i..2i+1 (0..2 suivis, 3 fixe) ; 16 lampes au plus
-    float3 ratio;       // rapport « après / avant » des groupes 0..2 (1 : inchangé ou inconnu)
+    uint lightGroups;   // group of lamp i in bits 2i..2i+1 (0..2 tracked, 3 fixed); 16 lamps at most
+    float3 ratio;       // "after / before" ratio of groups 0..2 (1: unchanged or unknown)
 };
 
 uint KrcLightGroup(KrcRelightParameters krcParameters, uint lightIndex)
@@ -44,7 +44,7 @@ uint KrcLightGroup(KrcRelightParameters krcParameters, uint lightIndex)
     return lightIndex < 16u ? (krcParameters.lightGroups >> (2u * lightIndex)) & 3u : 3u;
 }
 
-// lumière directe d'une lampe, rangée dans son groupe (luminance) ; à sommer sur les lampes du sommet
+// direct light of a lamp, stored in its group (luminance); to be summed over the vertex's lamps
 float3 KrcGroupSplit(KrcRelightParameters krcParameters, uint lightIndex, float3 lightContribution)
 {
     const uint g = KrcLightGroup(krcParameters, lightIndex);
@@ -62,9 +62,9 @@ void KrcGroupAdd(KrcRelightParameters krcParameters, HashGridIndex cell, float4 
     if (s.w != 0) InterlockedAdd(BUFFER_AT_OFFSET(krcParameters.groupAccumulationBuffer, cell).w, s.w);
 }
 
-// Juste avant SharcUpdateHit, avec le même état, la même lumière directe et le même nombre
-// aléatoire : refait son insertion et sa décision de relecture du cache, et range les parts aux
-// mêmes cellules. directGroups : somme des KrcGroupSplit des lampes du sommet.
+// Just before SharcUpdateHit, with the same state, the same direct light and the same random
+// number: redoes its insertion and its cache-read decision, and stores the shares in the
+// same cells. directGroups: sum of the KrcGroupSplit of the vertex's lamps.
 void KrcUpdateHit(in SharcParameters sharcParameters, KrcRelightParameters krcParameters, in SharcState sharcState, SharcHitData sharcHitData,
     float3 directLighting, float3 directGroups, float random)
 {
@@ -101,7 +101,7 @@ void KrcUpdateHit(in SharcParameters sharcParameters, KrcRelightParameters krcPa
     if (lum <= 0.0f)
         return;
 
-    // la cellule du sommet garde sa lumière directe démodulée (comme SHaRC), sauf relecture du cache
+    // the vertex's cell keeps its demodulated direct light (like SHaRC), unless the cache is read
     if (!resampled)
         KrcGroupAdd(krcParameters, cell, groups * (SharcLuma(radiance / materialDemodulation) / lum));
 
@@ -114,7 +114,7 @@ void KrcUpdateHit(in SharcParameters sharcParameters, KrcRelightParameters krcPa
     }
 }
 
-// juste avant SharcUpdateMiss : le ciel ne compte que dans le total
+// just before SharcUpdateMiss: the sky only counts in the total
 void KrcUpdateMiss(KrcRelightParameters krcParameters, in SharcState sharcState, float3 radiance)
 {
     for (uint i = 0; i < sharcState.pathLength; ++i)
@@ -127,9 +127,9 @@ void KrcUpdateMiss(KrcRelightParameters krcParameters, in SharcState sharcState,
 }
 #endif // SHARC_UPDATE
 
-// Dans la passe de résolution, juste avant SharcResolveEntry : moyenne des parts avec les poids de
-// SHaRC (accumulationFrameNum : celui de SharcResolveParameters). Renvoie si l'entrée était occupée,
-// à passer à KrcResolveEviction. Les entrées vides (la plupart de la table) ne coûtent qu'une lecture.
+// In the resolve pass, just before SharcResolveEntry: mean of the shares with SHaRC's weights
+// (accumulationFrameNum: the one from SharcResolveParameters). Returns whether the entry was occupied,
+// to pass to KrcResolveEviction. Empty entries (most of the table) cost only one read.
 bool KrcResolveEntry(uint entryIndex, SharcParameters sharcParameters, KrcRelightParameters krcParameters, uint accumulationFrameNum)
 {
     if (entryIndex >= sharcParameters.hashGridData.capacity)
@@ -158,8 +158,8 @@ bool KrcResolveEntry(uint entryIndex, SharcParameters sharcParameters, KrcReligh
     return true;
 }
 
-// Juste après SharcResolveEntry : une cellule que SHaRC vient d'évincer libère ses parts et son
-// produit S, pour que la prochaine cellule rangée là reparte de zéro (et de S = 1).
+// Right after SharcResolveEntry: a cell that SHaRC has just evicted frees its shares and its
+// product S, so that the next cell stored there starts again from zero (and from S = 1).
 void KrcResolveEviction(uint entryIndex, SharcParameters sharcParameters, KrcRelightParameters krcParameters, bool wasValid)
 {
     if (!wasValid || BUFFER_AT_OFFSET(sharcParameters.hashGridData.hashEntriesBuffer, entryIndex) != HASH_GRID_INVALID_HASH_KEY)
@@ -169,8 +169,8 @@ void KrcResolveEviction(uint entryIndex, SharcParameters sharcParameters, KrcRel
     BUFFER_AT_OFFSET(krcParameters.factorBuffer, entryIndex) = float2(0, 0);
 }
 
-// Passe à part, une entrée par fil, avant la mise à jour de SHaRC d'une frame où un rapport est
-// connu : rééclaire la cellule et note son facteur.
+// Separate pass, one entry per thread, before SHaRC's update on a frame where a ratio is
+// known: relights the cell and records its factor.
 void KrcRelightEntry(uint entryIndex, SharcParameters sharcParameters, KrcRelightParameters krcParameters)
 {
     if (entryIndex >= sharcParameters.hashGridData.capacity)
@@ -196,8 +196,8 @@ void KrcRelightEntry(uint entryIndex, SharcParameters sharcParameters, KrcReligh
     BUFFER_AT_OFFSET(krcParameters.factorBuffer, entryIndex) = float2(k, (factor.y == 0.0f ? 1.0f : factor.y) * k);
 }
 
-// Facteurs de la cellule d'un point (x : de la frame, y : produit S) ; (1, 1) sans cellule. Au
-// premier point touché, à écrire dans une texture pour le débruiteur.
+// Factors of a point's cell (x: of the frame, y: product S); (1, 1) without a cell. At the
+// first hit point, to be written to a texture for the denoiser.
 float2 KrcGetRelightFactor(in SharcParameters sharcParameters, KrcRelightParameters krcParameters, float3 position, float3 normal)
 {
     HashGridKey hashGridKey;

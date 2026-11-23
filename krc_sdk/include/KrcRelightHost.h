@@ -1,18 +1,18 @@
 /*
- * KRC : côté CPU du rééclairage exact (KrcRelight.h). Indépendant du moteur, C++17, sans dépendance.
+ * KRC: CPU side of exact relighting (KrcRelight.h). Engine-independent, C++17, no dependency.
  *
- * À chaque frame, le moteur donne la puissance de chaque lampe (intensité × luminance de la couleur)
- * et son groupe (0..2 suivis, 3 fixe) ; KrcRelightHost calcule le rapport « après / avant » de chaque
- * groupe. Un groupe est inconnu (rapport 1, non appliqué) si ses lampes ne changent pas toutes du même
- * rapport ou si l'une s'allume depuis zéro : sa part dans les cellules ne dit alors rien de la
- * nouvelle lumière.
+ * Each frame, the engine gives the power of each lamp (intensity × luminance of its colour)
+ * and its group (0..2 tracked, 3 fixed); KrcRelightHost computes the "after / before" ratio of each
+ * group. A group is unknown (ratio 1, not applied) if its lamps do not all change by the same
+ * ratio or if one of them turns on from zero: its share in the cells then says nothing about the
+ * new light.
  *
  *   KrcRelightHost host;
  *   host.BeginFrame(cacheCleared);
- *   for (lampe i) host.AddLight(i, group, intensity * luminance(color));
+ *   for (lamp i) host.AddLight(i, group, intensity * luminance(color));
  *   KrcRelightFrame f = host.EndFrame();
- *   // f.ratio, f.lightGroups -> KrcRelightParameters ; f.event -> passe KrcRelightEntry avant la
- *   // mise à jour de SHaRC ; f.active -> S différent de 1 quelque part (débruiteur)
+ *   // f.ratio, f.lightGroups -> KrcRelightParameters; f.event -> KrcRelightEntry pass before the
+ *   // SHaRC update; f.active -> S differs from 1 somewhere (denoiser)
  */
 
 #ifndef KRC_RELIGHT_HOST_H
@@ -26,9 +26,9 @@
 struct KrcRelightFrame
 {
     float ratio[3] = { 1.0f, 1.0f, 1.0f };
-    uint32_t lightGroups = 0; // groupe de la lampe i aux bits 2i..2i+1
-    bool event = false;       // un rapport connu est à appliquer cette frame
-    bool active = false;      // un rééclairage a eu lieu depuis la remise à zéro du cache
+    uint32_t lightGroups = 0; // group of lamp i in bits 2i..2i+1
+    bool event = false;       // a known ratio must be applied this frame
+    bool active = false;      // a relighting has happened since the cache was reset
 };
 
 class KrcRelightHost
@@ -46,7 +46,7 @@ public:
             m_active = false;
     }
 
-    // lightIndex : indice stable de la lampe d'une frame à l'autre (16 au plus pour lightGroups)
+    // lightIndex: stable index of the lamp from one frame to the next (16 at most for lightGroups)
     void AddLight(uint32_t lightIndex, int group, float power)
     {
         group = std::min(std::max(group, 0), 3);
@@ -61,7 +61,7 @@ public:
             return;
         if (prev <= 0.0f)
         {
-            m_known[group] = false; // s'allume depuis zéro : rapport inconnu
+            m_known[group] = false; // turns on from zero: unknown ratio
             return;
         }
         const float r = power / prev;
