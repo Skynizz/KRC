@@ -1,5 +1,5 @@
 {
- "reglages": {
+ "settings": {
   "scene": "LivingRoom.scene.json",
   "name": "living_room_krcl",
   "methods": [
@@ -11,24 +11,24 @@
   "acc": 512,
   "eval_only": false
  },
- "resultats": {
+ "results": {
   "sharc": {
    "nrd_flip": 0.07299272529780865,
-   "nrd_flip_ecart": 0.0012657800542297648,
+   "nrd_flip_std": 0.0012657800542297648,
    "nrd_psnr": 32.18322896771696,
    "noise_raw": 0.14355770610572788,
-   "biais_flip": 0.07428844273090363,
-   "biais_relmse": 0.016251563506197896,
+   "bias_flip": 0.07428844273090363,
+   "bias_relmse": 0.016251563506197896,
    "lum": 1.0209547313403255,
    "gpu_ms": 3.806
   },
   "krcl": {
    "nrd_flip": 0.07226875144988298,
-   "nrd_flip_ecart": 0.001022344411159893,
+   "nrd_flip_std": 0.001022344411159893,
    "nrd_psnr": 32.21494998251423,
    "noise_raw": 0.14310237974184886,
-   "biais_flip": 0.07617631554603577,
-   "biais_relmse": 0.01665799501499919,
+   "bias_flip": 0.07617631554603577,
+   "bias_relmse": 0.01665799501499919,
    "lum": 1.0228958376401587,
    "gpu_ms": 5.8439
   }

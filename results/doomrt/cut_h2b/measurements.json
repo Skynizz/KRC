@@ -1,5 +1,5 @@
 {
- "reglages": {
+ "settings": {
   "maps": [
    1
   ],
@@ -19,7 +19,7 @@
   ],
   "timeout": 900
  },
- "cartes": {
+ "maps": {
   "E1M1": {
    "sharc": {
     "before": 50.92081115994808,

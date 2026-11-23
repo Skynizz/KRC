@@ -1,11 +1,11 @@
-"""Réaction à un changement de lumière dans le path tracer d'exemple de NVIDIA (branche krc).
+"""Response to a lighting change in NVIDIA's sample path tracer (krc branch).
 
-Une session invisible : références A et B (chemins complets accumulés, jitter coupé), puis pour
-chaque méthode et chaque débruiteur (NRD, aucun) : convergence avec l'éclairage A, bascule vers B,
-captures à +k frames. Mesures contre la référence B : ꟻLIP (frames NRD) et écart de luminance
-moyenne hors ciel (le retard du cache, lisible même sur une frame brute).
+One invisible session: references A and B (accumulated full paths, jitter off), then for
+each method and each denoiser (NRD, none): convergence with lighting A, switch to B,
+captures at +k frames. Measured against reference B: ꟻLIP (NRD frames) and the gap in mean
+luminance outside the sky (the cache lag, readable even on a raw frame).
 
-  python -I tools/rtxgi/event.py --scene LivingRoom.scene.json --name salon_soleil \\
+  python -I tools/rtxgi/event.py --scene LivingRoom.scene.json --name living_room_sun \\
       --before sun=20 --after sun=5 --methods sharc krcl
 """
 
@@ -24,15 +24,15 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 
 METHODS = {
     'sharc': ['tech=sharc', 'scale=50', 'guide=0', 'relight=0', 'nrdconf=0', 'nrdaf=1'],
-    'sharc_vide': ['tech=sharc', 'scale=50', 'guide=0', 'relight=0', 'nrdconf=0', 'nrdaf=1'],  # cache vidé à la bascule
-    'sharc_nrdreset': ['tech=sharc', 'scale=50', 'guide=0', 'relight=0', 'nrdconf=0', 'nrdaf=1'],  # NRD vidé à la bascule
-    'krcl': ['tech=sharc', 'scale=50', 'guide=0', 'relight=1', 'nrdconf=0', 'nrdaf=1', 'krcdebug=0'],  # SHaRC + rééclairage exact
-    'krcl_conf': ['tech=sharc', 'scale=50', 'guide=0', 'relight=1', 'nrdconf=1', 'nrdaf=1', 'krcdebug=0'],  # + confiance de NRD
-    'krcl_norm': ['tech=sharc', 'scale=50', 'guide=0', 'relight=1', 'nrdconf=2', 'nrdaf=1', 'krcdebug=0'],  # + historique de NRD rééclairé
+    'sharc_cleared': ['tech=sharc', 'scale=50', 'guide=0', 'relight=0', 'nrdconf=0', 'nrdaf=1'],  # cache cleared at the switch
+    'sharc_nrdreset': ['tech=sharc', 'scale=50', 'guide=0', 'relight=0', 'nrdconf=0', 'nrdaf=1'],  # NRD cleared at the switch
+    'krcl': ['tech=sharc', 'scale=50', 'guide=0', 'relight=1', 'nrdconf=0', 'nrdaf=1', 'krcdebug=0'],  # SHaRC + exact relighting
+    'krcl_conf': ['tech=sharc', 'scale=50', 'guide=0', 'relight=1', 'nrdconf=1', 'nrdaf=1', 'krcdebug=0'],  # + NRD confidence
+    'krcl_norm': ['tech=sharc', 'scale=50', 'guide=0', 'relight=1', 'nrdconf=2', 'nrdaf=1', 'krcdebug=0'],  # + relit NRD history
     'krcl_conf0': ['tech=sharc', 'scale=50', 'guide=0', 'relight=1', 'nrdconf=1', 'nrdaf=1', 'krcdebug=3'],  # diagnostic
-    'krcal_norm': ['tech=krc', 'scale=50', 'guide=0', 'relight=1', 'nrdconf=2', 'nrdaf=1', 'krcdebug=0'],  # KRC-A + rééclairage
+    'krcal_norm': ['tech=krc', 'scale=50', 'guide=0', 'relight=1', 'nrdconf=2', 'nrdaf=1', 'krcdebug=0'],  # KRC-A + relighting
 }
-AT_SWITCH = {'sharc_vide': ['clear'], 'sharc_nrdreset': ['nrdreset']}
+AT_SWITCH = {'sharc_cleared': ['clear'], 'sharc_nrdreset': ['nrdreset']}
 OFFSETS = [0, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
 
 
@@ -58,8 +58,8 @@ def plan(methods, setup, before, after, ref_spp, warm):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--scene', default='LivingRoom.scene.json')
-    ap.add_argument('--name', default='salon_soleil')
-    ap.add_argument('--setup', nargs='*', default=[], help='commandes du début (lampes ajoutées, groupes)')
+    ap.add_argument('--name', default='living_room_sun')
+    ap.add_argument('--setup', nargs='*', default=[], help='start commands (added lamps, groups)')
     ap.add_argument('--before', nargs='+', default=['sun=20'])
     ap.add_argument('--after', nargs='+', default=['sun=5'])
     ap.add_argument('--methods', nargs='+', default=['sharc', 'krcl'])
@@ -76,30 +76,30 @@ def main():
     refA, refB = img.read_pfm(f'{out}/refA.pfm'), img.read_pfm(f'{out}/refB.pfm')
     mask = L(refA) < 5.0  # hors ciel
     lb = L(refB)[mask].mean()
-    print(f'changement de luminance hors ciel A -> B : {L(refA)[mask].mean() / lb:.3f}')
+    print(f'luminance change outside the sky A -> B: {L(refA)[mask].mean() / lb:.3f}')
     dst = os.path.join(ROOT, 'results', 'rtxgi', a.name)
     os.makedirs(dst, exist_ok=True)
-    img.write_png(os.path.join(dst, 'reference_avant.png'), img.tonemap(refA))
-    img.write_png(os.path.join(dst, 'reference_apres.png'), img.tonemap(refB))
+    img.write_png(os.path.join(dst, 'reference_before.png'), img.tonemap(refA))
+    img.write_png(os.path.join(dst, 'reference_after.png'), img.tonemap(refB))
 
     res = {}
     for name in a.methods:
-        r = {'offsets': OFFSETS, 'nrd_flip': [], 'nrd_lum': [], 'brut_lum': []}
+        r = {'offsets': OFFSETS, 'nrd_flip': [], 'nrd_lum': [], 'raw_lum': []}
         for k in OFFSETS:
             nrd = img.read_pfm(f'{out}/{name}_nrd_{k}.pfm')
             raw = img.read_pfm(f'{out}/{name}_none_{k}.pfm')
             r['nrd_flip'].append(img.flip(nrd, refB)[0])
             r['nrd_lum'].append(float(L(nrd)[mask].mean() / lb))
-            r['brut_lum'].append(float(L(raw)[mask].mean() / lb))
+            r['raw_lum'].append(float(L(raw)[mask].mean() / lb))
             if k in (0, 4, 32):
                 img.write_png(os.path.join(dst, f'{name}_nrd_{k}.png'), img.tonemap(nrd))
         res[name] = r
         print(f'{name:11s} NRD FLIP ' + ' '.join(f'{v:.3f}' for v in r['nrd_flip']))
         print(f'{"":11s} NRD lum  ' + ' '.join(f'{v:.3f}' for v in r['nrd_lum']))
-        print(f'{"":11s} brut lum ' + ' '.join(f'{v:.3f}' for v in r['brut_lum']), flush=True)
-    print('frames : ' + ' '.join(str(k) for k in OFFSETS))
-    with open(os.path.join(dst, 'evenement.json'), 'w') as f:
-        json.dump({'reglages': vars(a), 'resultats': res}, f, indent=1)
+        print(f'{"":11s} raw lum  ' + ' '.join(f'{v:.3f}' for v in r['raw_lum']), flush=True)
+    print('frames: ' + ' '.join(str(k) for k in OFFSETS))
+    with open(os.path.join(dst, 'event.json'), 'w') as f:
+        json.dump({'settings': vars(a), 'results': res}, f, indent=1)
 
 
 if __name__ == '__main__':

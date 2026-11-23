@@ -1,5 +1,5 @@
-"""Images du banc RTXGI : lecture des PFM (HDR linéaire), courbe de tons de l'exemple (Reinhard
-sur la luminance, puis sRGB), PSNR et ꟻLIP-like simples, planches et vidéos."""
+"""Images of the RTXGI bench: PFM reading (linear HDR), the sample's tone curve (Reinhard
+on luminance, then sRGB), simple PSNR and ꟻLIP-like metrics, contact sheets and videos."""
 
 import subprocess
 
@@ -16,7 +16,7 @@ def read_pfm(path):
 
 
 def tonemap(hdr, exposure=1.0):
-    """Comme Tonemapping.hlsl : exposition, Reinhard sur la luminance, écrêtage ; puis sRGB."""
+    """Like Tonemapping.hlsl: exposure, Reinhard on luminance, clipping; then sRGB."""
     c = np.maximum(hdr * exposure, 0)
     lum = c @ np.array([0.299, 0.587, 0.114])
     k = np.where(lum > 0, (lum / (lum + 1)) / np.maximum(lum, 1e-12), 0)
@@ -25,12 +25,12 @@ def tonemap(hdr, exposure=1.0):
 
 
 def psnr(a, b):
-    """PSNR des images affichées (après courbe de tons), en dB."""
+    """PSNR of the displayed images (after the tone curve), in dB."""
     return 10 * np.log10(1.0 / max(((tonemap(a) - tonemap(b)) ** 2).mean(), 1e-12))
 
 
 def rel_mse(a, b):
-    """relMSE en HDR, sans le 0,1 % de pixels les plus fautifs (pratique des articles)."""
+    """relMSE in HDR, without the worst 0.1 % of pixels (common practice in papers)."""
     e = (((a - b) ** 2) / (b ** 2 + 1e-2)).mean(-1).ravel()
     e.sort()
     return float(e[: int(len(e) * 0.999)].mean())
@@ -45,14 +45,14 @@ def write_png(path, ldr):
 
 
 def error_map(a, b, gain=8.0):
-    """Écart signé des images affichées, gris = 0."""
+    """Signed difference of the displayed images, grey = 0."""
     return np.clip((tonemap(a) - tonemap(b)) * gain + 0.5, 0, 1)
 
 
 def flip(test, ref, hdr=False):
-    """ꟻLIP de NVIDIA (NVlabs/flip) : erreur perçue en alternant les deux images, 0 à 1 (plus bas =
-    mieux). LDR : sur les images affichées (courbe de tons de l'exemple) ; HDR : sur les images
-    linéaires, ꟻLIP balaie lui-même les expositions. Renvoie (erreur moyenne, carte en magma)."""
+    """NVIDIA's ꟻLIP (NVlabs/flip): error perceived when flipping between the two images, 0 to 1 (lower =
+    better). LDR: on the displayed images (the sample's tone curve); HDR: on the linear
+    images, ꟻLIP sweeps the exposures itself. Returns (mean error, magma map)."""
     import flip_evaluator
     if hdr:
         a, b = np.maximum(ref, 0).astype(np.float32), np.maximum(test, 0).astype(np.float32)

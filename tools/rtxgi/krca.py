@@ -1,11 +1,11 @@
-"""KRC-A (cellules adaptatives) contre SHaRC dans le path tracer d'exemple de NVIDIA.
+"""KRC-A (adaptive cells) versus SHaRC in NVIDIA's sample path tracer.
 
-Une session invisible par scène : référence (chemins complets accumulés), puis pour chaque méthode
-une frame débruitée par NRD (ce que voit le joueur), une moyenne de frames (biais seul du cache) et
-le temps GPU. Tout à la même image (jitter coupé, comme NRD).
+One invisible session per scene: reference (accumulated full paths), then for each method
+a frame denoised by NRD (what the player sees), a mean of frames (bias of the cache alone) and
+the GPU time. Everything on the same image (jitter off, like NRD).
 
-  python -I tools/rtxgi/krca.py --scene LivingRoom.scene.json --name salon
-Sorties : F:/rtxgi/out/<nom>/*.pfm, résultats/rtxgi/<nom>/ (PNG, mesures.json)
+  python -I tools/rtxgi/krca.py --scene LivingRoom.scene.json --name living_room
+Outputs: F:/rtxgi/out/<name>/*.pfm, results/rtxgi/<name>/ (PNG, measurements.json)
 """
 
 import argparse
@@ -21,12 +21,12 @@ import run  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# nom : (commandes de la méthode)
+# name: (commands of the method)
 METHODS = {
     'sharc50': ['tech=sharc', 'scale=50'],
     'sharc100': ['tech=sharc', 'scale=100'],
     'krca100': ['tech=krc', 'scale=100'],
-    'krca50': ['tech=krc', 'scale=50'],   # cellules fines de la taille SHaRC, mères deux fois plus grandes
+    'krca50': ['tech=krc', 'scale=50'],   # fine cells of SHaRC size, parents twice as large
 }
 
 
@@ -56,7 +56,7 @@ def main():
     ap.add_argument('--warm', type=int, default=250)
     ap.add_argument('--acc', type=int, default=512)
     ap.add_argument('--cam', default='', help='px,py,pz,tx,ty,tz')
-    ap.add_argument('--eval-only', action='store_true', help='réévaluer les captures existantes')
+    ap.add_argument('--eval-only', action='store_true', help='re-evaluate the existing captures')
     a = ap.parse_args()
 
     out = f'F:/rtxgi/out/{a.name}'
@@ -65,7 +65,7 @@ def main():
         script = f'15:cam={a.cam};' + script
     if not a.eval_only:
         if os.path.exists(f'{out}/fps.txt'):
-            os.remove(f'{out}/fps.txt')   # un temps GPU par méthode, de cette série seulement
+            os.remove(f'{out}/fps.txt')   # one GPU time per method, from this run only
         print(run.run(out, script, ['-scene', a.scene]))
 
     ref = img.read_pfm(f'{out}/ref.pfm')
@@ -83,21 +83,21 @@ def main():
         nrd = img.read_pfm(f'{out}/{name}_nrd.pfm')
         flip_nrd, flip_map = img.flip(nrd, ref)
         res[name] = {
-            'biais_psnr': img.psnr(acc, ref), 'biais_relmse': img.rel_mse(acc, ref),
-            'biais_flip': img.flip(acc, ref)[0],
+            'bias_psnr': img.psnr(acc, ref), 'bias_relmse': img.rel_mse(acc, ref),
+            'bias_flip': img.flip(acc, ref)[0],
             'nrd_psnr': img.psnr(nrd, ref), 'nrd_relmse': img.rel_mse(nrd, ref),
             'nrd_flip': flip_nrd, 'nrd_flip_hdr': img.flip(nrd, ref, hdr=True)[0],
             'lum': float(acc.mean() / ref.mean()), 'gpu_ms': gpu.get(name, 0.0),
         }
         img.write_png(os.path.join(dst, f'{name}_nrd.png'), img.tonemap(nrd))
-        img.write_png(os.path.join(dst, f'{name}_erreur.png'), img.error_map(acc, ref))
+        img.write_png(os.path.join(dst, f'{name}_error.png'), img.error_map(acc, ref))
         img.write_png(os.path.join(dst, f'{name}_flip.png'), flip_map)
         r = res[name]
-        print(f'{name:9s} biais PSNR {r["biais_psnr"]:.2f} relMSE {r["biais_relmse"]:.4f} FLIP {r["biais_flip"]:.4f} '
+        print(f'{name:9s} bias PSNR {r["bias_psnr"]:.2f} relMSE {r["bias_relmse"]:.4f} FLIP {r["bias_flip"]:.4f} '
               f'lum {r["lum"]:.3f} | frame NRD PSNR {r["nrd_psnr"]:.2f} FLIP {r["nrd_flip"]:.4f} '
               f'(HDR {r["nrd_flip_hdr"]:.4f}) | GPU {r["gpu_ms"]:.2f} ms')
-    with open(os.path.join(dst, 'mesures.json'), 'w') as f:
-        json.dump({'reglages': vars(a), 'resultats': res}, f, indent=1)
+    with open(os.path.join(dst, 'measurements.json'), 'w') as f:
+        json.dump({'settings': vars(a), 'results': res}, f, indent=1)
 
 
 if __name__ == '__main__':

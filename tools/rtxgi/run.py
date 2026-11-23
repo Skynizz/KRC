@@ -1,7 +1,7 @@
-"""Lance le path tracer d'exemple du SDK RTXGI de NVIDIA (branche krc) sur un scénario, sans
-fenêtre visible ni prise de focus, et attend la fin.
+"""Runs the sample path tracer of NVIDIA's RTXGI SDK (krc branch) on a script, with no
+visible window and without taking the focus, and waits for the end.
 
-  python -I tools/rtxgi/run.py --out F:/rtxgi/out/essai --script "10:tech=ref;10:den=acc;300:capture=ref;301:exit"
+  python -I tools/rtxgi/run.py --out F:/rtxgi/out/test --script "10:tech=ref;10:den=acc;300:capture=ref;301:exit"
 """
 
 import argparse
@@ -25,7 +25,7 @@ def run(out, script, extra_args=(), timeout=1800, width=1280, height=720, visibl
     while p.poll() is None:
         if time.time() - t0 > timeout:
             p.kill()
-            print('délai dépassé')
+            print('timed out')
             break
         pid = wintypes.DWORD()
         user32.GetWindowThreadProcessId(user32.GetForegroundWindow(), ctypes.byref(pid))

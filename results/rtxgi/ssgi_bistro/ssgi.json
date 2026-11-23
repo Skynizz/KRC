@@ -1,5 +1,5 @@
 {
- "reglages": {
+ "settings": {
   "scene": "Bistro.scene.json",
   "name": "bistro",
   "variants": [
@@ -12,7 +12,7 @@
   "frames": 400,
   "eval_only": false
  },
- "resultats": {
+ "results": {
   "game": {
    "flip": 0.14488476514816284,
    "psnr": 26.084496760458862,

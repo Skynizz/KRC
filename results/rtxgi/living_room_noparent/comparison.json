@@ -1,45 +1,45 @@
 {
- "reglages": {
+ "settings": {
   "scene": "LivingRoom.scene.json",
   "name": "living_room_noparent",
   "methods": [
    "sharc",
    "krca",
-   "krca_nomere"
+   "krca_noparent"
   ],
   "ref": 2048,
   "warm": 250,
   "acc": 512,
   "eval_only": false
  },
- "resultats": {
+ "results": {
   "sharc": {
    "nrd_flip": 0.07229962851852179,
-   "nrd_flip_ecart": 0.0011185808422004644,
+   "nrd_flip_std": 0.0011185808422004644,
    "nrd_psnr": 32.20796281830939,
    "noise_raw": 0.14355780333612053,
-   "biais_flip": 0.07432344555854797,
-   "biais_relmse": 0.01625933968475926,
+   "bias_flip": 0.07432344555854797,
+   "bias_relmse": 0.01625933968475926,
    "lum": 1.0209919866073087,
    "gpu_ms": 4.6244
   },
   "krca": {
    "nrd_flip": 0.08269332814961672,
-   "nrd_flip_ecart": 0.0015145411259647858,
+   "nrd_flip_std": 0.0015145411259647858,
    "nrd_psnr": 31.852459260585597,
    "noise_raw": 0.13923905043931747,
-   "biais_flip": 0.06840655207633972,
-   "biais_relmse": 0.014720353782294608,
+   "bias_flip": 0.06840655207633972,
+   "bias_relmse": 0.014720353782294608,
    "lum": 1.015596439581915,
    "gpu_ms": 5.4457
   },
-  "krca_nomere": {
+  "krca_noparent": {
    "nrd_flip": 0.07232924457639456,
-   "nrd_flip_ecart": 0.0010394229920893585,
+   "nrd_flip_std": 0.0010394229920893585,
    "nrd_psnr": 32.203805909550155,
    "noise_raw": 0.14345801893173019,
-   "biais_flip": 0.07350147515535355,
-   "biais_relmse": 0.01608525803033559,
+   "bias_flip": 0.07350147515535355,
+   "bias_relmse": 0.01608525803033559,
    "lum": 1.020191437540693,
    "gpu_ms": 5.7909
   }

@@ -1,11 +1,11 @@
-"""Labo de l'éclairage global à l'écran (KRC-SSGI, futur effet ReShade) dans le path tracer de NVIDIA.
+"""Lab for screen-space global illumination (KRC-SSGI, a future ReShade effect) in NVIDIA's path tracer.
 
-Une session invisible : référence (chemins complets accumulés), puis le « jeu » (lumière directe
-seule, accumulée : sans bruit, comme un rendu en rastérisation), puis le jeu + l'effet, réglage par
-réglage. Mesures contre la référence : ꟻLIP, luminance hors ciel, bruit d'une frame à l'autre,
-temps GPU (frame entière : l'écart avec le jeu seul est le coût de l'effet).
+One invisible session: reference (accumulated full paths), then the "game" (direct light
+only, accumulated: noise-free, like a rasterised render), then the game + the effect, setting by
+setting. Measured against the reference: ꟻLIP, luminance outside the sky, frame-to-frame noise,
+GPU time (whole frame: the difference with the game alone is the cost of the effect).
 
-  python -I tools/rtxgi/ssgi.py --scene LivingRoom.scene.json --name salon
+  python -I tools/rtxgi/ssgi.py --scene LivingRoom.scene.json --name living_room
 """
 
 import argparse
@@ -22,8 +22,8 @@ import run  # noqa: E402
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 VARIANTS = {
-    'jeu': ['ssgi=0'],                                              # sans éclairage indirect
-    'ideal': ['ssgi=1', 'ssginormals=1', 'ssgialbedo=1'],           # normales et albédo du G-buffer
+    'game': ['ssgi=0'],                                             # no indirect lighting
+    'ideal': ['ssgi=1', 'ssginormals=1', 'ssgialbedo=1'],           # G-buffer normals and albedo
     'reshade': ['ssgi=1', 'ssginormals=0', 'ssgialbedo=0'],         # seulement couleur + profondeur
 }
 LAST = 8
@@ -44,9 +44,9 @@ def plan(variants, settings, ref_spp, frames):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--scene', default='LivingRoom.scene.json')
-    ap.add_argument('--name', default='salon')
-    ap.add_argument('--variants', nargs='+', default=['jeu', 'ideal', 'reshade'])
-    ap.add_argument('--set', nargs='*', default=[], help='réglages ssgi*=... communs')
+    ap.add_argument('--name', default='living_room')
+    ap.add_argument('--variants', nargs='+', default=['game', 'ideal', 'reshade'])
+    ap.add_argument('--set', nargs='*', default=[], help='shared ssgi*=... settings')
     ap.add_argument('--ref', type=int, default=2048)
     ap.add_argument('--frames', type=int, default=400)
     ap.add_argument('--eval-only', action='store_true')
@@ -75,15 +75,15 @@ def main():
         r = {
             'flip': img.flip(last, ref)[0], 'psnr': img.psnr(last, ref),
             'lum': float(L(last)[mask].mean() / L(ref)[mask].mean()),
-            'bruit': float(ldr.std(0).mean()), 'gpu_ms': gpu.get(name, 0.0),
+            'noise': float(ldr.std(0).mean()), 'gpu_ms': gpu.get(name, 0.0),
         }
         res[name] = r
         img.write_png(os.path.join(dst, f'{name}.png'), img.tonemap(last))
         img.write_png(os.path.join(dst, f'{name}_flip.png'), img.flip(last, ref)[1])
-        print(f'{name:10s} FLIP {r["flip"]:.4f} PSNR {r["psnr"]:.2f} | lum hors ciel {r["lum"]:.3f} | '
-              f'bruit {r["bruit"]:.4f} | GPU {r["gpu_ms"]:.2f} ms', flush=True)
+        print(f'{name:10s} FLIP {r["flip"]:.4f} PSNR {r["psnr"]:.2f} | lum outside the sky {r["lum"]:.3f} | '
+              f'noise {r["noise"]:.4f} | GPU {r["gpu_ms"]:.2f} ms', flush=True)
     with open(os.path.join(dst, 'ssgi.json'), 'w') as f:
-        json.dump({'reglages': vars(a), 'resultats': res}, f, indent=1)
+        json.dump({'settings': vars(a), 'results': res}, f, indent=1)
 
 
 if __name__ == '__main__':

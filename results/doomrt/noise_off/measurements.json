@@ -1,5 +1,5 @@
 {
- "reglages": {
+ "settings": {
   "maps": [
    3,
    1
@@ -18,18 +18,18 @@
    "KRC_HYBRID=0"
   ]
  },
- "cartes": {
+ "maps": {
   "E1M3": {
    "sharc": {
     "noise_fine": 0.0127470374766155,
     "noise_blotches": 0.004793317670406695,
-    "biais_psnr": 55.333763856341214,
+    "bias_psnr": 55.333763856341214,
     "psnr_frame": 53.77944289156358
    },
    "krc": {
     "noise_fine": 0.010262404313010873,
     "noise_blotches": 0.005105070848347688,
-    "biais_psnr": 51.437004148526114,
+    "bias_psnr": 51.437004148526114,
     "psnr_frame": 50.79297097746077
    }
   },
@@ -37,13 +37,13 @@
    "sharc": {
     "noise_fine": 0.006486460030376056,
     "noise_blotches": 0.002345801374455843,
-    "biais_psnr": 53.37236468775427,
+    "bias_psnr": 53.37236468775427,
     "psnr_frame": 51.84479965710248
    },
    "krc": {
     "noise_fine": 0.004244272231768137,
     "noise_blotches": 0.0017041189426903866,
-    "biais_psnr": 52.2509151609908,
+    "bias_psnr": 52.2509151609908,
     "psnr_frame": 51.213086440933
    }
   }

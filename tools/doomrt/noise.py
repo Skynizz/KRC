@@ -1,10 +1,10 @@
-"""Bruit et biais de chaque méthode dans Doom RT, sur une session figée (touche Pause).
+"""Noise and bias of each method in Doom RT, on a frozen session (Pause key).
 
-Pour chaque méthode : préchauffage, puis N frames consécutives capturées une à une. On en tire
-  - le bruit temporel : écart-type d'une frame à l'autre, par pixel (fin : grain ; gros : taches
-    qui scintillent, mesuré sur les images floutées) ;
-  - le biais : la moyenne des N frames contre la référence (chemins complets, accumulés).
-Hors de l'arme du joueur, en luminance d'affichage.
+For each method: warm-up, then N consecutive frames captured one by one. From them we get
+  - the temporal noise: standard deviation from one frame to the next, per pixel (fine: grain; coarse: blotches
+    that flicker, measured on blurred images);
+  - the bias: the mean of the N frames against the reference (full paths, accumulated).
+Outside the player's weapon, in display luminance.
 
   python -I tools/doomrt/noise.py --maps 1 3 --env KRC_PPP=0.05 KRC_EMIT_PHYS=1
 """
@@ -36,7 +36,7 @@ def main():
     ap.add_argument('--frames', type=int, default=32)
     ap.add_argument('--warm', type=int, default=400)
     ap.add_argument('--acc', type=int, default=256)
-    ap.add_argument('--name', default='bruit')
+    ap.add_argument('--name', default='noise')
     ap.add_argument('--env', nargs='*', default=[])
     a = ap.parse_args()
 
@@ -54,7 +54,7 @@ def main():
     captures.append(f'{ref_frame}+{a.acc}')
     env = dict(e.split('=', 1) for e in a.env)
 
-    summary = {'reglages': vars(a), 'cartes': {}}
+    summary = {'settings': vars(a), 'maps': {}}
     for mp in a.maps:
         out = os.path.join(bench.GAME, 'cap', a.name, f'E1M{mp}')
         print(f'E1M{mp} ...', flush=True)
@@ -70,19 +70,19 @@ def main():
             coarse = np.stack([blur(x) for x in lum]).std(0)
             scale = lref[mask].mean()
             r = {
-                'bruit_fin': float(fine[mask].mean() / scale),       # relatif à la luminance moyenne
-                'bruit_taches': float(coarse[mask].mean() / scale),
-                'biais_psnr': float(10 * np.log10(1.0 / max(((mean - lref) ** 2)[mask].mean(), 1e-12))),
+                'noise_fine': float(fine[mask].mean() / scale),       # relative to the mean luminance
+                'noise_blotches': float(coarse[mask].mean() / scale),
+                'bias_psnr': float(10 * np.log10(1.0 / max(((mean - lref) ** 2)[mask].mean(), 1e-12))),
                 'psnr_frame': float(np.mean([10 * np.log10(1.0 / max(((x - lref) ** 2)[mask].mean(), 1e-12))
                                              for x in lum])),
             }
             res[bench.NAMES[m]] = r
-            print(f'  {bench.NAMES[m]:6s} bruit fin {r["bruit_fin"]:.4f}  taches {r["bruit_taches"]:.4f}  '
-                  f'| PSNR moyenne (biais) {r["biais_psnr"]:.2f}  PSNR par frame {r["psnr_frame"]:.2f}', flush=True)
-        summary['cartes'][f'E1M{mp}'] = res
+            print(f'  {bench.NAMES[m]:6s} fine noise {r["noise_fine"]:.4f}  blotches {r["noise_blotches"]:.4f}  '
+                  f'| PSNR of the mean (bias) {r["bias_psnr"]:.2f}  PSNR per frame {r["psnr_frame"]:.2f}', flush=True)
+        summary['maps'][f'E1M{mp}'] = res
     dst = os.path.join(ROOT, 'results', 'doomrt', a.name)
     os.makedirs(dst, exist_ok=True)
-    with open(os.path.join(dst, 'mesures.json'), 'w') as fh:
+    with open(os.path.join(dst, 'measurements.json'), 'w') as fh:
         json.dump(summary, fh, indent=1)
 
 

@@ -1,5 +1,5 @@
 {
- "reglages": {
+ "settings": {
   "scene": "LivingRoom.scene.json",
   "name": "living_room",
   "methods": [
@@ -13,11 +13,11 @@
   "cam": "",
   "eval_only": false
  },
- "resultats": {
+ "results": {
   "sharc50": {
-   "biais_psnr": 31.96113183179801,
-   "biais_relmse": 0.016275522708298382,
-   "biais_flip": 0.0743594616651535,
+   "bias_psnr": 31.96113183179801,
+   "bias_relmse": 0.016275522708298382,
+   "bias_flip": 0.0743594616651535,
    "nrd_psnr": 32.10516647370339,
    "nrd_relmse": 0.0116354063165826,
    "nrd_flip": 0.07566749304533005,
@@ -26,9 +26,9 @@
    "gpu_ms": 3.9038
   },
   "krca50": {
-   "biais_psnr": 32.30258726574414,
-   "biais_relmse": 0.014651287465727279,
-   "biais_flip": 0.06796629726886749,
+   "bias_psnr": 32.30258726574414,
+   "bias_relmse": 0.014651287465727279,
+   "bias_flip": 0.06796629726886749,
    "nrd_psnr": 31.665421954428407,
    "nrd_relmse": 0.01276276225046146,
    "nrd_flip": 0.08779917657375336,
@@ -37,9 +37,9 @@
    "gpu_ms": 4.376
   },
   "krca100": {
-   "biais_psnr": 32.59562729524625,
-   "biais_relmse": 0.013052787682545367,
-   "biais_flip": 0.055314503610134125,
+   "bias_psnr": 32.59562729524625,
+   "bias_relmse": 0.013052787682545367,
+   "bias_flip": 0.055314503610134125,
    "nrd_psnr": 31.20693890984481,
    "nrd_relmse": 0.014180855304121593,
    "nrd_flip": 0.09953946620225906,

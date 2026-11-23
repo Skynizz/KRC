@@ -1,14 +1,14 @@
-"""Test de réaction à un changement de lumière dans Quake II RTX (branche krc).
+"""Response test to a lighting change in Quake II RTX (krc branch).
 
-La démo q2demo1 est figée (pause) à une frame donnée : caméra et scène immobiles. Après
-convergence, toutes les lampes passent brusquement à SCALE de leur intensité
-(pt_test_light_scale, « coupure de courant ») ; on capture les frames suivantes, puis, dans
-la même session et donc avec la même caméra, une référence par le rendu de référence du jeu
-(accumulation en pause).
+The q2demo1 demo is frozen (paused) at a given frame: camera and scene still. After
+convergence, every lamp drops suddenly to SCALE of its intensity
+(pt_test_light_scale, a "power cut"); the following frames are captured, then, in
+the same session and so with the same camera, a reference from the game's reference renderer
+(accumulation while paused).
 
     python tools/q2rtx/lag_test.py [--frame 300] [--scale 0.15] [--modes 0 1 2]
 
-Sorties : results/q2rtx/reaction/ (images, reaction.png, mesures.txt : PSNR contre la référence).
+Outputs: results/q2rtx/reaction/ (images, reaction.png, measurements.txt: PSNR against the reference).
 """
 import argparse
 import os
@@ -17,7 +17,7 @@ import subprocess
 
 GAME = 'F:/Q2RTX-KRC'
 OUT = os.path.join(os.path.dirname(__file__), '..', '..', 'results', 'q2rtx', 'reaction')
-NAMES = {0: 'Jeu sans cache', 1: 'SHaRC NVIDIA', 2: 'KRC'}
+NAMES = {0: 'Game without cache', 1: 'SHaRC NVIDIA', 2: 'KRC'}
 AFTER = [1, 2, 4, 8, 16, 32, 64]
 
 
@@ -38,22 +38,22 @@ def shots_dir():
 
 
 def method(mode, frame, scale, extra, spp):
-    # le moteur ignore la pause en timedemo : on quitte le timedemo au moment de figer la démo
+    # the engine ignores pause in timedemo mode: timedemo is left when the demo is frozen
     lines = ['set timedemo 1', 'set pt_accumulation_rendering 0', f'set pt_cache {mode}', *extra,
-             'demo q2demo1', f'wait {frame}', 'set timedemo 0; pause', 'wait 90', f'screenshotpng rt_m{mode}_avant',
-             # exposition figée : l'adaptation de l'œil du jeu ne doit pas se mêler au retard mesuré
+             'demo q2demo1', f'wait {frame}', 'set timedemo 0; pause', 'wait 90', f'screenshotpng rt_m{mode}_before',
+             # frozen exposure: the game's eye adaptation must not mix with the measured lag
              'set tm_exposure_speed_up 0; set tm_exposure_speed_down 0', f'set pt_test_light_scale {scale}']
     prev = 0
     for a in AFTER:
         lines += [f'wait {a - prev}', f'screenshotpng rt_m{mode}_p{a:02d}']
         prev = a
-    # référence d'après, même caméra : chemins complets à 8 rebonds sans cache (pt_cache 3), accumulés en pause
+    # "after" reference, same camera: full 8-bounce paths without a cache (pt_cache 3), accumulated while paused
     lines += ['set pt_cache 3', 'set pt_dof 0', 'set pt_fake_roughness_threshold 1', f'set pt_accumulation_rendering_framenum {spp}', 'set pt_accumulation_rendering 1',
               f'wait {spp + 30}', f'screenshotpng rt_m{mode}_ref', 'set pt_test_light_scale 1', 'wait 5', 'quit']
     run(f'rt{mode}.cfg', lines)
     dst = os.path.join(OUT, f'm{mode}')
     os.makedirs(dst, exist_ok=True)
-    for tag in ['avant', 'ref'] + [f'p{a:02d}' for a in AFTER]:
+    for tag in ['before', 'ref'] + [f'p{a:02d}' for a in AFTER]:
         src = os.path.join(shots_dir(), f'rt_m{mode}_{tag}.png')
         if os.path.exists(src):
             os.replace(src, os.path.join(dst, f'{tag}.png'))
@@ -70,15 +70,15 @@ def psnr(a, b):
 
 
 def strip(modes):
-    # une ligne par méthode : avant, +1, +4, +16, +64, et la référence d'après
-    tags = ['avant', 'p01', 'p04', 'p16', 'p64', 'ref']
-    labels = ['avant', '+1 frame', '+4', '+16', '+64', 'reference apres']
+    # one row per method: before, +1, +4, +16, +64, and the "after" reference
+    tags = ['before', 'p01', 'p04', 'p16', 'p64', 'ref']
+    labels = ['before', '+1 frame', '+4', '+16', '+64', 'reference after']
     rows = []
     for m in modes:
         imgs = [os.path.join(OUT, f'm{m}', f'{t}.png') for t in tags]
         if not all(os.path.exists(p) for p in imgs):
             continue
-        row = os.path.join(OUT, f'ligne_m{m}.png')
+        row = os.path.join(OUT, f'line_m{m}.png')
         cmd = ['ffmpeg', '-y', '-loglevel', 'error']
         for p in imgs:
             cmd += ['-i', p]
@@ -103,20 +103,20 @@ def main():
     ap.add_argument('--scale', type=float, default=0.15)
     ap.add_argument('--modes', type=int, nargs='+', default=[0, 1, 2])
     ap.add_argument('--spp', type=int, default=512)
-    ap.add_argument('--set', nargs='*', default=[], help='cvars supplémentaires, "nom=valeur"')
+    ap.add_argument('--set', nargs='*', default=[], help='extra cvars, "name=value"')
     a = ap.parse_args()
     extra = [f'set {kv.split("=")[0]} {kv.split("=")[1]}' for kv in a.set]
     os.makedirs(OUT, exist_ok=True)
     for m in a.modes:
         method(m, a.frame, a.scale, extra, a.spp)
-    report = [f"Coupure à {a.scale} à la frame {a.frame} (démo en pause) ; PSNR (dB) contre la référence d'après"]
+    report = [f"Cut at {a.scale} at frame {a.frame} (demo paused); PSNR (dB) against the reference after"]
     for m in a.modes:
         d = os.path.join(OUT, f'm{m}')
         ref = os.path.join(d, 'ref.png')
-        line = f'{NAMES[m]} :' + ''.join(f' | +{t} {psnr(os.path.join(d, f"p{t:02d}.png"), ref)}' for t in AFTER)
+        line = f'{NAMES[m]}:' + ''.join(f' | +{t} {psnr(os.path.join(d, f"p{t:02d}.png"), ref)}' for t in AFTER)
         report.append(line)
         print(line, flush=True)
-    with open(os.path.join(OUT, 'mesures.txt'), 'w', encoding='utf8') as f:
+    with open(os.path.join(OUT, 'measurements.txt'), 'w', encoding='utf8') as f:
         f.write('\n'.join(report) + '\n')
     strip(a.modes)
 

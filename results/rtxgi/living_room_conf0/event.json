@@ -1,5 +1,5 @@
 {
- "reglages": {
+ "settings": {
   "scene": "LivingRoom.scene.json",
   "name": "living_room_conf0",
   "setup": [],
@@ -16,7 +16,7 @@
   "warm": 300,
   "eval_only": false
  },
- "resultats": {
+ "results": {
   "krcl_conf0": {
    "offsets": [
     0,
@@ -51,7 +51,7 @@
     1.0147962253670861,
     0.9917403178115571
    ],
-   "brut_lum": [
+   "raw_lum": [
     1.0637898067936895,
     1.0604302524490716,
     1.0612069116342016,

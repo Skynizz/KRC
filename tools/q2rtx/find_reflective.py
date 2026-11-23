@@ -1,5 +1,5 @@
-"""Repère dans les cartes de pak0.pak les surfaces qui reflètent (eau, verre : SURF_WARP, SURF_TRANS*)
-et imprime les plus grandes zones (centre, aire, normale), pour y placer la caméra.
+"""Finds the reflective surfaces in the maps of pak0.pak (water, glass: SURF_WARP, SURF_TRANS*)
+and prints the largest areas (centre, area, normal), to place the camera there.
 
     python -I tools/q2rtx/find_reflective.py F:/Q2RTX-KRC/baseq2/pak0.pak
 """
@@ -49,7 +49,7 @@ def analyse(data):
         for k in range(num):
             se = surfedges[first + k]
             pts.append(verts[edges[se][0]] if se >= 0 else verts[edges[-se][1]])
-        # aire du polygone
+        # polygon area
         area = 0.0
         for k in range(1, num - 1):
             a = [pts[k][j] - pts[0][j] for j in range(3)]

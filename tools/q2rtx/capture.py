@@ -1,14 +1,14 @@
-"""Captures et mesures dans Quake II RTX (branche krc de F:/Q2RTX-KRC).
+"""Captures and measurements in Quake II RTX (krc branch of F:/Q2RTX-KRC).
 
-Rejoue la démo q2demo1 en timedemo : chaque image rendue avance d'une frame de démo, donc
-une même frame montre exactement la même scène pour chaque méthode.
+Replays the q2demo1 demo in timedemo mode: each rendered image advances one demo frame, so
+a given frame shows exactly the same scene for every method.
 
-    python tools/q2rtx/capture.py                 # captures + i/s, méthodes 0 1 2
-    python tools/q2rtx/capture.py --modes 0 1     # méthodes choisies
+    python tools/q2rtx/capture.py                 # captures + fps, methods 0 1 2
+    python tools/q2rtx/capture.py --modes 0 1     # chosen methods
     python tools/q2rtx/capture.py --fps-only
 
-Méthodes (cvar pt_cache) : 0 jeu d'origine, 1 SHaRC (SDK NVIDIA), 2 KRC.
-Sorties : results/q2rtx/m<méthode>/fNNN.png, results/q2rtx/fps.txt, comparaisons côte à côte.
+Methods (cvar pt_cache): 0 original game, 1 SHaRC (NVIDIA SDK), 2 KRC.
+Outputs: results/q2rtx/m<method>/fNNN.png, results/q2rtx/fps.txt, side-by-side comparisons.
 """
 import argparse
 import os
@@ -18,7 +18,7 @@ import subprocess
 
 GAME = 'F:/Q2RTX-KRC'
 OUT = os.path.join(os.path.dirname(__file__), '..', '..', 'results', 'q2rtx')
-NAMES = {0: 'Jeu sans cache', 1: 'SHaRC NVIDIA', 2: 'KRC'}
+NAMES = {0: 'Game without cache', 1: 'SHaRC NVIDIA', 2: 'KRC'}
 FRAMES = [120, 270, 420, 560]
 
 
@@ -73,7 +73,7 @@ def side_by_side(modes, frames):
         cmd = ['ffmpeg', '-y', '-loglevel', 'error']
         for p in inputs:
             cmd += ['-i', p]
-        cmd += ['-filter_complex', filt, os.path.join(OUT, f'comparaison_f{f:03d}.png')]
+        cmd += ['-filter_complex', filt, os.path.join(OUT, f'comparison_f{f:03d}.png')]
         subprocess.run(cmd, check=True)
 
 
@@ -82,7 +82,7 @@ def main():
     ap.add_argument('--modes', type=int, nargs='+', default=[0, 1, 2])
     ap.add_argument('--frames', type=int, nargs='+', default=FRAMES)
     ap.add_argument('--fps-only', action='store_true')
-    ap.add_argument('--set', nargs='*', default=[], help='cvars supplémentaires, "nom=valeur"')
+    ap.add_argument('--set', nargs='*', default=[], help='extra cvars, "name=value"')
     a = ap.parse_args()
     settings = [f'set {kv.split("=")[0]} {kv.split("=")[1]}' for kv in a.set]
     os.makedirs(OUT, exist_ok=True)
@@ -91,7 +91,7 @@ def main():
         if not a.fps_only:
             capture(m, a.frames, settings)
         r = fps(m, settings)
-        line = f'{NAMES[m]} (pt_cache {m}) : ' + (f'{r[0]} frames en {r[1]} s, {float(r[2]):.1f} i/s' if r else 'échec')
+        line = f'{NAMES[m]} (pt_cache {m}): ' + (f'{r[0]} frames in {r[1]} s, {float(r[2]):.1f} fps' if r else 'failed')
         print(line, flush=True)
         report.append(line)
     with open(os.path.join(OUT, 'fps.txt'), 'w', encoding='utf8') as f:

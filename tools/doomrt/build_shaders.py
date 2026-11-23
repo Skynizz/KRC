@@ -1,10 +1,10 @@
-"""Compile les shaders de RTGL1 (branche krc de F:/RayTracedGL1) avec glslangValidator.
+"""Compiles the RTGL1 shaders (krc branch of F:/RayTracedGL1) with glslangValidator.
 
-RTGL1 utilise glslc (Vulkan SDK), absent ici : glslangValidator (compilé avec Quake II RTX) le
-remplace ; il lui faut l'extension GL_GOOGLE_include_directive, ajoutée à une copie de chaque
+RTGL1 uses glslc (Vulkan SDK), missing here: glslangValidator (built with Quake II RTX) replaces
+it; it needs the GL_GOOGLE_include_directive extension, added to a copy of each
 shader.
 
-    python -I tools/doomrt/build_shaders.py [--out F:/doom-rt-krc/ovrd/shaders] [fichier ...]
+    python -I tools/doomrt/build_shaders.py [--out F:/doom-rt-krc/ovrd/shaders] [file ...]
 """
 import argparse
 import os
@@ -30,7 +30,7 @@ def compile_one(path, out_dir, tmp_dir):
     name = os.path.basename(path)
     with open(path, encoding='utf8') as f:
         lines = f.read().split('\n')
-    # extension d'inclusion juste après #version
+    # include extension right after #version
     for i, l in enumerate(lines):
         if l.strip().startswith('#version'):
             lines.insert(i + 1, '#extension GL_GOOGLE_include_directive : require')
@@ -61,8 +61,8 @@ def main():
         ok, msg = compile_one(f, a.out, tmp)
         if not ok:
             errors += 1
-            print(f'ÉCHEC {os.path.basename(f)}\n{msg}\n', flush=True)
-    print(f'{len(files) - errors}/{len(files)} shaders compilés')
+            print(f'FAILED {os.path.basename(f)}\n{msg}\n', flush=True)
+    print(f'{len(files) - errors}/{len(files)} shaders compiled')
     sys.exit(1 if errors else 0)
 
 

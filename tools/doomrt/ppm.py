@@ -1,4 +1,4 @@
-"""Lecture des captures PPM de la DLL (KRC_CAPTURE) et mesures d'écart entre images."""
+"""Reading of the DLL's PPM captures (KRC_CAPTURE) and difference measurements between images."""
 
 import numpy as np
 
@@ -6,7 +6,7 @@ import numpy as np
 def read(path):
     with open(path, 'rb') as f:
         data = f.read()
-    # en-tête « P6\n<l> <h>\n255\n »
+    # header "P6\n<w> <h>\n255\n"
     parts = data.split(b'\n', 3)
     w, h = map(int, parts[1].split())
     return np.frombuffer(parts[3], np.uint8)[:w * h * 3].reshape(h, w, 3).astype(np.float64) / 255.0

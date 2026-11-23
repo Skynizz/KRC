@@ -1,11 +1,11 @@
-"""Comparaison robuste des méthodes dans le path tracer d'exemple de NVIDIA (branche krc).
+"""Robust comparison of the methods in NVIDIA's sample path tracer (krc branch).
 
-Une session invisible par scène, tout à la même image (jitter coupé, comme NRD) :
-  - référence : chemins complets accumulés ;
-  - pour chaque méthode : 8 frames débruitées par NRD (ꟻLIP moyen : ce que voit le joueur),
-    8 frames brutes (bruit avant NRD), une moyenne de frames (biais du cache seul), temps GPU.
+One invisible session per scene, everything on the same image (jitter off, like NRD):
+  - reference: accumulated full paths;
+  - for each method: 8 frames denoised by NRD (mean ꟻLIP: what the player sees),
+    8 raw frames (noise before NRD), a mean of frames (bias of the cache alone), GPU time.
 
-  python -I tools/rtxgi/compare.py --scene LivingRoom.scene.json --name salon --methods sharc sharc_guide
+  python -I tools/rtxgi/compare.py --scene LivingRoom.scene.json --name living_room --methods sharc sharc_guide
 """
 
 import argparse
@@ -26,12 +26,12 @@ METHODS = {
     'sharc_guide': ['tech=sharc', 'scale=50', 'guide=1', 'nrdaf=1'],
     'krca': ['tech=krc', 'scale=50', 'guide=0', 'krcdebug=0', 'nrdaf=1'],
     'krca_guide': ['tech=krc', 'scale=50', 'guide=1', 'nrdaf=1'],
-    'krca_nomere': ['tech=krc', 'scale=50', 'guide=0', 'krcdebug=2', 'nrdaf=1'],  # tout KRC-A sauf la lecture de la mère
-    'sharc_af0': ['tech=sharc', 'scale=50', 'guide=0', 'nrdaf=0'],  # anti-lucioles de NRD coupé
+    'krca_noparent': ['tech=krc', 'scale=50', 'guide=0', 'krcdebug=2', 'nrdaf=1'],  # all of KRC-A except reading the parent
+    'sharc_af0': ['tech=sharc', 'scale=50', 'guide=0', 'nrdaf=0'],  # NRD's anti-firefly off
     'krca_af0': ['tech=krc', 'scale=50', 'guide=0', 'krcdebug=0', 'nrdaf=0'],
-    'krcl': ['tech=sharc', 'scale=50', 'guide=0', 'relight=1', 'nrdconf=2', 'nrdaf=1'],  # SHaRC + rééclairage exact + historique de NRD rééclairé
-    'krcl_suivi': ['tech=sharc', 'scale=50', 'guide=0', 'relight=1', 'nrdconf=0', 'nrdaf=1'],  # parts des groupes seulement
-    'path': ['tech=ref', 'guide=0', 'nrdaf=1'],   # path tracing complet sans cache, même débruiteur
+    'krcl': ['tech=sharc', 'scale=50', 'guide=0', 'relight=1', 'nrdconf=2', 'nrdaf=1'],  # SHaRC + exact relighting + relit NRD history
+    'krcl_follow': ['tech=sharc', 'scale=50', 'guide=0', 'relight=1', 'nrdconf=0', 'nrdaf=1'],  # group shares only
+    'path': ['tech=ref', 'guide=0', 'nrdaf=1'],   # full path tracing without a cache, same denoiser
 }
 FRAMES = 8
 
@@ -85,21 +85,21 @@ def main():
         acc = img.read_pfm(f'{out}/{name}_acc.pfm')
         flips = [img.flip(x, ref)[0] for x in nrd]
         r = {
-            'nrd_flip': float(np.mean(flips)), 'nrd_flip_ecart': float(np.std(flips)),
+            'nrd_flip': float(np.mean(flips)), 'nrd_flip_std': float(np.std(flips)),
             'nrd_psnr': float(np.mean([img.psnr(x, ref) for x in nrd])),
-            'bruit_brut': float(raw.std(0).mean()),
-            'biais_flip': img.flip(acc, ref)[0], 'biais_relmse': img.rel_mse(acc, ref),
+            'noise_raw': float(raw.std(0).mean()),
+            'bias_flip': img.flip(acc, ref)[0], 'bias_relmse': img.rel_mse(acc, ref),
             'lum': float(acc.mean() / ref.mean()), 'gpu_ms': gpu.get(name, 0.0),
         }
         res[name] = r
         img.write_png(os.path.join(dst, f'{name}_nrd.png'), img.tonemap(nrd[0]))
-        img.write_png(os.path.join(dst, f'{name}_brut.png'), raw[0])
+        img.write_png(os.path.join(dst, f'{name}_raw.png'), raw[0])
         img.write_png(os.path.join(dst, f'{name}_flip.png'), img.flip(nrd[0], ref)[1])
-        print(f'{name:12s} NRD FLIP {r["nrd_flip"]:.4f} +- {r["nrd_flip_ecart"]:.4f} PSNR {r["nrd_psnr"]:.2f} | '
-              f'bruit brut {r["bruit_brut"]:.4f} | biais FLIP {r["biais_flip"]:.4f} relMSE {r["biais_relmse"]:.4f} '
+        print(f'{name:12s} NRD FLIP {r["nrd_flip"]:.4f} +- {r["nrd_flip_std"]:.4f} PSNR {r["nrd_psnr"]:.2f} | '
+              f'raw noise {r["noise_raw"]:.4f} | bias FLIP {r["bias_flip"]:.4f} relMSE {r["bias_relmse"]:.4f} '
               f'lum {r["lum"]:.3f} | GPU {r["gpu_ms"]:.2f} ms', flush=True)
-    with open(os.path.join(dst, 'comparaison.json'), 'w') as f:
-        json.dump({'reglages': vars(a), 'resultats': res}, f, indent=1)
+    with open(os.path.join(dst, 'comparison.json'), 'w') as f:
+        json.dump({'settings': vars(a), 'results': res}, f, indent=1)
 
 
 if __name__ == '__main__':

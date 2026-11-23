@@ -1,5 +1,5 @@
 {
- "reglages": {
+ "settings": {
   "scene": "LivingRoom.scene.json",
   "name": "living_room",
   "variants": [
@@ -12,7 +12,7 @@
   "frames": 400,
   "eval_only": false
  },
- "resultats": {
+ "results": {
   "game": {
    "flip": 0.5627425909042358,
    "psnr": 11.436965596762949,

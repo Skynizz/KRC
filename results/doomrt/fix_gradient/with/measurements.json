@@ -1,5 +1,5 @@
 {
- "reglages": {
+ "settings": {
   "maps": [
    1
   ],
@@ -14,7 +14,7 @@
   "env": [],
   "timeout": 900
  },
- "cartes": {
+ "maps": {
   "E1M1": {
    "game": {
     "before": 40.507708339012886,

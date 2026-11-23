@@ -1,5 +1,5 @@
 {
- "reglages": {
+ "settings": {
   "scene": "Bathroom.scene.json",
   "name": "bathroom",
   "methods": [
@@ -12,11 +12,11 @@
   "cam": "",
   "eval_only": false
  },
- "resultats": {
+ "results": {
   "sharc50": {
-   "biais_psnr": 35.60826685038541,
-   "biais_relmse": 0.005062552400131574,
-   "biais_flip": 0.04682106897234917,
+   "bias_psnr": 35.60826685038541,
+   "bias_relmse": 0.005062552400131574,
+   "bias_flip": 0.04682106897234917,
    "nrd_psnr": 32.190109071616384,
    "nrd_relmse": 0.011556545689125026,
    "nrd_flip": 0.10506046563386917,
@@ -25,9 +25,9 @@
    "gpu_ms": 2.9709
   },
   "krca50": {
-   "biais_psnr": 35.33412452847959,
-   "biais_relmse": 0.005150162418190542,
-   "biais_flip": 0.04796985164284706,
+   "bias_psnr": 35.33412452847959,
+   "bias_relmse": 0.005150162418190542,
+   "bias_flip": 0.04796985164284706,
    "nrd_psnr": 31.919061217783625,
    "nrd_relmse": 0.012285545822008453,
    "nrd_flip": 0.1082620844244957,

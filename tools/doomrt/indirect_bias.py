@@ -1,8 +1,8 @@
-"""Biais de l'indirect non filtré de KRC face à la référence (mode 3), réglage par réglage.
+"""Bias of KRC's unfiltered indirect against the reference (mode 3), setting by setting.
 
-Chaque variante est une session figée : KRC (affichage de l'indirect non filtré), puis la
-référence accumulée dans la même session. Le rapport KRC / référence est donné par bande de
-luminance de la référence (une perte d'énergie dans les zones sombres se voit tout de suite).
+Each variant is a frozen session: KRC (display of the unfiltered indirect), then the
+reference accumulated in the same session. The KRC / reference ratio is given per luminance band
+of the reference (an energy loss in dark areas shows at once).
 
   python -I tools/doomrt/indirect_bias.py --variant base= --variant sans_rs=KRC_RESAMPLE=0
 """
@@ -28,10 +28,10 @@ def blur(a, r=6):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--variant', action='append', default=[], help='nom=NOM1=v1,NOM2=v2')
+    ap.add_argument('--variant', action='append', default=[], help='name=NAME1=v1,NAME2=v2')
     ap.add_argument('--map', type=int, default=1)
     ap.add_argument('--acc', type=int, default=512)
-    ap.add_argument('--kacc', type=int, default=64, help='frames moyennées pour KRC')
+    ap.add_argument('--kacc', type=int, default=64, help='frames averaged for KRC')
     a = ap.parse_args()
 
     k_end = 600 + a.kacc
@@ -40,7 +40,7 @@ def main():
     for v in a.variant:
         name, _, settings = v.partition('=')
         env = dict(s.split('=', 1) for s in settings.split(',') if s)
-        out = os.path.join(bench.GAME, 'cap', 'biais', name)
+        out = os.path.join(bench.GAME, 'cap', 'bias', name)
         bench.run_session(a.map, out, script, captures, env, 1200)
         k = ppm.read(os.path.join(out, 'f00600.ppm'))
         r = ppm.read(os.path.join(out, f'f{k_end + 310:05d}.ppm'))
@@ -53,7 +53,7 @@ def main():
             m = mask & (lr >= lo) & (lr < hi)
             bands.append(f'{lk[m].mean() / lr[m].mean():.3f}' if m.sum() else '-')
         print(f'{name:12s} lum {ppm.luminance(k)[mask].mean() / ppm.luminance(r)[mask].mean():.3f} '
-              f'| par bande {" ".join(bands)} | PSNR {ppm.psnr(k, r, mask):.2f}', flush=True)
+              f'| per band {" ".join(bands)} | PSNR {ppm.psnr(k, r, mask):.2f}', flush=True)
 
 
 if __name__ == '__main__':
