@@ -1,6 +1,6 @@
-//! Pilote du pipeline KRC entièrement GPU (krc_gpu.wgsl). Par frame, le CPU n'envoie que la
-//! scène (quelques centaines d'octets) et, s'il y a lieu, la description de l'événement ; il ne
-//! relit que l'image et quelques compteurs, pour l'évaluation (hors chronométrage GPU).
+//! Driver of the fully GPU KRC pipeline (krc_gpu.wgsl). Per frame, the CPU only sends the
+//! scene (a few hundred bytes) and, when needed, the description of the event; it only
+//! reads back the image and a few counters, for evaluation (outside GPU timing).
 use crate::deps::{Coarse, SUPER, WORDS};
 use crate::gpu::{f3, lights_to_gpu, scene_to_gpu, GBox, GLight, Gpu, MAX_BOXES, MAX_LIGHTS};
 use crate::grid::Grid;
@@ -10,7 +10,7 @@ use crate::render::World;
 use crate::rt::{Accel, TriScene};
 use crate::scene::{cosine_dir, Scene};
 
-/// Caméra et résolution.
+/// Camera and resolution.
 #[derive(Clone, Copy, Debug)]
 pub struct View {
     pub w: usize,
@@ -36,7 +36,7 @@ impl View {
     }
 }
 
-/// Description d'un événement pour le GPU (mots de `ev`), si la scène a changé.
+/// Description of an event for the GPU (words of `ev`), if the scene changed.
 #[derive(Clone)]
 pub struct GpuEvent {
     pub words: Vec<u32>,
@@ -53,7 +53,7 @@ const ACC: usize = 52;
 const CELL_BYTES: usize = 160;
 const CTR: usize = 256;
 
-// indices des compteurs (doivent suivre krc_gpu.wgsl)
+// counter indices (must follow krc_gpu.wgsl)
 const C_CELLS: usize = 0;
 const C_TASKS: usize = 1;
 const C_SURF: usize = 2;
@@ -121,32 +121,32 @@ struct FrameU {
     off: u32,
 }
 
-/// Méthode du pipeline.
+/// Pipeline method.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Method {
     Krc,
-    /// cache SHaRC-like maison (cellules KRC, moyenne glissante, 1 chemin par pixel)
+    /// home-made SHaRC-like cache (KRC cells, running average, 1 path per pixel)
     SharcLike,
-    /// portage WGSL du SHaRC officiel de NVIDIA (sharc.wgsl)
+    /// WGSL port of NVIDIA's official SHaRC (sharc.wgsl)
     Sharc,
 }
 
-/// Paramètres du SHaRC officiel : valeurs par défaut de l'exemple Pathtracer de NVIDIA RTXGI
-/// (UI.h : sceneScale 50, accumulation 20 frames, éviction après 60, 1 pixel par bloc 5×5 ;
-/// Pathtracer.cpp : 4 M entrées).
+/// Parameters of the official SHaRC: default values of NVIDIA RTXGI's Pathtracer sample
+/// (UI.h: sceneScale 50, accumulation 20 frames, eviction after 60, 1 pixel per 5×5 block;
+/// Pathtracer.cpp: 4 M entries).
 #[derive(Clone, Copy, Debug)]
 pub struct ShParams {
     pub scene_scale: f32,
     pub accum_frames: u32,
     pub stale_frames: u32,
-    /// quantification des radiances (u32) : l'exemple prend 1e3 pour des radiances ~1 ; nos
-    /// scènes sont ~30× plus sombres (Sponza), d'où 1e4 pour que la troncature reste < 0,2 %
+    /// radiance quantisation (u32): the sample uses 1e3 for radiances ~1; our
+    /// scenes are ~30× darker (Sponza), hence 1e4 so that truncation stays < 0.2 %
     pub radiance_scale: f32,
     pub downscale: u32,
-    /// chemins par pixel de la passe Render (l'exemple : samplesPerPixel, 1 par défaut)
+    /// paths per pixel of the Render pass (the sample: samplesPerPixel, 1 by default)
     pub render_spp: u32,
-    /// image finale : passe Render (chemin par pixel, cache aux impacts secondaires) au lieu de
-    /// la vue du cache au premier impact
+    /// final image: Render pass (path per pixel, cache at secondary hits) instead of
+    /// the cache view at the first hit
     pub render: bool,
 }
 
@@ -184,7 +184,7 @@ const F_DSPLIT: u32 = 16384;
 const F_GAME: u32 = 32768;
 const F_DRS: u32 = 65536;
 
-/// Résultat d'une frame.
+/// Result of a frame.
 pub struct GpuFrame {
     pub image: Vec<V3>,
     pub cells: u32,
@@ -198,21 +198,21 @@ pub struct GpuFrame {
     pub hard: u32,
     pub safety: u32,
     pub overflow: u32,
-    /// cellules encore en attente de leurs chemins corrélés (événement amorti)
+    /// cells still waiting for their correlated paths (amortised event)
     pub pending: u32,
     pub max_n: f32,
     pub debt: u32,
-    /// cellules évincées dans la frame, cellules libres, pierres tombales (caméra mobile)
+    /// cells evicted in the frame, free cells, tombstones (moving camera)
     pub evicted: u32,
     pub free: u32,
     pub _tombs: u32,
-    /// segments tracés par les chemins ordinaires, et chemins arrêtés sur le cache
+    /// segments traced by ordinary paths, and paths stopped on the cache
     pub segs: u32,
     pub rs_hits: u32,
-    /// genre de chaque pixel (0 vide, 1 lampe, 2 surface), si l'image a été relue
+    /// kind of each pixel (0 empty, 1 lamp, 2 surface), if the image was read back
     pub kinds: Vec<u8>,
     pub probe_rays: usize,
-    /// durée GPU de chaque passe (timestamps), en ms
+    /// GPU duration of each pass (timestamps), in ms
     pub passes: Vec<(&'static str, f64)>,
 }
 
@@ -229,7 +229,7 @@ pub struct GpuKrc<'a> {
     sharc: bool,
     pipes: std::collections::HashMap<&'static str, wgpu::ComputePipeline>,
     bufs: Vec<wgpu::Buffer>,
-    /// un groupe de liaisons (boîtes) ; deux en triangles (TLAS courante/précédente alternées)
+    /// one binding group (boxes); two for triangles (current/previous TLAS alternating)
     binds: Vec<wgpu::BindGroup>,
     bind_idx: usize,
     accel: Option<Accel>,
@@ -244,67 +244,67 @@ pub struct GpuKrc<'a> {
     cell_cap: u32,
     table_mask: u32,
     seed: u32,
-    /// relire l'image à chaque frame (évaluation) ; le banc de vitesse s'en passe
+    /// read the image back every frame (evaluation); the speed bench does without
     pub readback: bool,
-    /// budget : chemins par pixel de surface et par frame
+    /// budget: paths per surface pixel per frame
     pub ppp: f32,
-    /// amortir les événements de lampe (chemins corrélés plafonnés par frame)
+    /// amortise lamp events (correlated paths capped per frame)
     pub amortize: bool,
-    /// plafond de la variance relative d'allocation, en multiples de la médiane (0 : aucun)
+    /// cap of the relative allocation variance, in multiples of the median (0: none)
     pub rel_cap: f32,
-    /// seuil de l'effet énergétique attendu (fraction de la luminance de la cellule)
+    /// threshold of the expected energy effect (fraction of the cell's luminance)
     pub eps_energy: f32,
-    /// poids max d'une estimation corrigée (0 : N_POST du shader)
+    /// max weight of a corrected estimate (0: the shader's N_POST)
     pub n_post: f32,
-    /// variance après correction : au moins celle de l'historique
+    /// variance after correction: at least the history's
     pub s2_hist: bool,
-    /// événement de lampe : historique plafonné aussi pour les cellules sans différence mesurée
+    /// lamp event: history capped for cells without a measured difference too
     pub zero_cap: bool,
-    /// rééchantillonnage du cache : chemins ordinaires arrêtés au 1er ou 2e rebond sur une cellule
+    /// cache resampling: ordinary paths stopped at the 1st or 2nd bounce on a cell
     pub resample: bool,
-    /// largeur d'une cellule, en pixels (à la distance de la surface)
+    /// width of a cell, in pixels (at the surface's distance)
     pub cell_px: f32,
-    /// un chemin ordinaire sur `rec_every` enregistre ses dépendances (1 : tous)
+    /// one ordinary path in `rec_every` records its dependencies (1: all)
     pub rec_every: u32,
-    /// qualité cible (erreur relative de la moyenne d'une cellule) ; 0 : budget fixe
+    /// target quality (relative error of a cell's mean); 0: fixed budget
     pub tau: f32,
-    /// réutilisation des sommets : le 1er rebond nourrit aussi la cellule visible qu'il touche
+    /// vertex reuse: the 1st bounce also feeds the visible cell it hits
     pub reuse: bool,
-    /// démodulation matériau (radiance / albédo dans les cellules)
+    /// material demodulation (radiance / albedo in the cells)
     pub demod: bool,
-    /// cellule neuve initialisée depuis le niveau voisin
+    /// new cell initialised from the neighbouring level
     pub seed_levels: bool,
-    /// cellules de support hors champ pour le rééchantillonnage
+    /// off-screen support cells for resampling
     pub support: bool,
-    /// cache à deux résolutions (cellules fines et 2× plus grandes)
+    /// two-resolution cache (fine cells and 2× larger ones)
     pub multi: bool,
-    /// pipeline « comme en jeu » : image finale par pixel (KRC : direct par pixel + indirect des
-    /// cellules ; SHaRC : passe Render), puis débruiteur commun (game.wgsl)
+    /// "game-like" pipeline: per-pixel final image (KRC: per-pixel direct + indirect from the
+    /// cells; SHaRC: Render pass), then a shared denoiser (game.wgsl)
     pub game: bool,
-    /// débruiteur du pipeline de jeu
+    /// denoiser of the game pipeline
     pub denoise: bool,
-    /// mode jeu, ancienne variante : cellules « indirect seulement »
+    /// game mode, old variant: "indirect only" cells
     pub indirect_only: bool,
-    /// débruiteur à 5 passages à-trous (pas 1 à 16) au lieu de 3
+    /// denoiser with 5 à-trous passes (steps 1 to 16) instead of 3
     pub dn_wide: bool,
-    /// mode jeu : estimations par pixel de l'éclairage direct et du reflet (KRC)
+    /// game mode: per-pixel estimates of direct lighting and reflection (KRC)
     pub krc_spp: u32,
-    /// diagnostic de l'image finale KRC : 1 indirect des cellules seul, 2 direct + reflet seuls
+    /// diagnostic of KRC's final image: 1 cells' indirect alone, 2 direct + reflection alone
     pub dbg: u32,
-    /// protections désactivées (diagnostic) : 1 anti-lucioles, 2 moyenne tronquée, 4 écrêtage
-    /// des cellules, 8 régularisation des chemins
+    /// protections disabled (diagnostic): 1 anti-firefly, 2 truncated mean, 4 cell
+    /// clamping, 8 path regularisation
     pub off: u32,
-    /// référence régularisée (mêmes chemins que le mode jeu au-delà du premier sommet)
+    /// regularised reference (same paths as game mode beyond the first vertex)
     pub ref_reg: bool,
-    /// chemins corrélés arrêtés sur le cache (événements moins chers)
+    /// correlated paths stopped on the cache (cheaper events)
     pub delta_resample: bool,
-    /// chemins corrélés par cellule pour un événement de lampe (0 : 8)
+    /// correlated paths per cell for a lamp event (0: 8)
     pub m_light: u32,
-    /// part du budget qui rembourse les chemins d'événement (< 0 : 0,5)
+    /// share of the budget that pays back event paths (< 0: 0.5)
     pub debt_rate: f32,
-    /// changement relatif au-delà duquel une cellule corrigée repart de zéro (0 : jamais)
+    /// relative change beyond which a corrected cell restarts from zero (0: never)
     pub reset_ratio: f32,
-    /// bornage de l'historique du débruiteur, en écarts-types (0 : 1,5)
+    /// denoiser history clamp, in standard deviations (0: 1.5)
     pub dn_gamma: f32,
     prev_view: View,
     pending: Option<GpuEvent>,
@@ -314,12 +314,12 @@ pub struct GpuKrc<'a> {
     _dn_bufs: [wgpu::Buffer; 4],
     _spec_bufs: [wgpu::Buffer; 3],
     _sampler: wgpu::Sampler,
-    /// compteur de frames monotone (éviction des cellules invisibles)
+    /// monotonic frame counter (eviction of invisible cells)
     clock: u32,
-    /// la table de hachage a trop de pierres tombales : reconstruction au début de la frame suivante
+    /// the hash table has too many tombstones: rebuild at the start of the next frame
     rebuild: bool,
     method: Method,
-    /// paramètres du SHaRC officiel (méthode Sharc)
+    /// parameters of the official SHaRC (Sharc method)
     pub sh: ShParams,
     sh_cap: u32,
     sh_cam_prev: V3,
@@ -380,12 +380,12 @@ const ENTRIES: [&str; 50] = [
 const MAX_PASSES: u32 = 48;
 
 impl<'a> GpuKrc<'a> {
-    /// Pièces en enfilade (boîtes alignées), grille fixe.
+    /// Rooms in a row (axis-aligned boxes), fixed grid.
     pub fn new(gpu: &'a Gpu, world: World, sharc: bool, seed: u32) -> GpuKrc<'a> {
         GpuKrc::with(gpu, View::of(&world), Grid::boxes(), None, sharc, seed)
     }
 
-    /// Cas général : `tri` = scène en triangles (ray query matériel) ou None pour les boîtes.
+    /// General case: `tri` = triangle scene (hardware ray query) or None for boxes.
     pub fn with(gpu: &'a Gpu, view: View, grid: Grid, tri: Option<&TriScene>, sharc: bool, seed: u32) -> GpuKrc<'a> {
         GpuKrc::with_method(gpu, view, grid, tri, if sharc { Method::SharcLike } else { Method::Krc }, seed)
     }
@@ -395,9 +395,9 @@ impl<'a> GpuKrc<'a> {
         let sh_cap = if method == Method::Sharc { SH_CAPACITY } else { 16 };
         let dev = &gpu.device;
         let len = view.len();
-        // une cellule couvre 2 à 4 pixels de large ; avec le jitter, ≈ len/6 cellules distinctes par
-        // vue ; une caméra mobile en crée ~3 000 par frame à 480×270 et les garde 60 frames avant
-        // de les évincer (~250 000 cellules vivantes mesurées dans Sponza), d'où 2 par pixel
+        // a cell covers 2 to 4 pixels in width; with the jitter, ≈ len/6 distinct cells per
+        // view; a moving camera creates ~3,000 per frame at 480×270 and keeps them 60 frames before
+        // evicting them (~250,000 live cells measured in Sponza), hence 2 per pixel
         let cell_cap = (2 * len).next_power_of_two().max(1 << 14) as u32;
         let table = (cell_cap as usize * 2).next_power_of_two();
         let task_cap = cell_cap as usize * 10 + len * 9;
@@ -436,7 +436,7 @@ impl<'a> GpuKrc<'a> {
         });
         let mut src = grid.template(include_str!("krc_gpu.wgsl")) + include_str!("sharc.wgsl") + include_str!("game.wgsl");
         if tri.is_some() {
-            let (a, b) = (src.find("// <geometrie>").unwrap(), src.find("// </geometrie>").unwrap());
+            let (a, b) = (src.find("// <geometry>").unwrap(), src.find("// </geometry>").unwrap());
             src = format!("{}{}{}", &src[..a], crate::rt::TRI_GEOMETRY, &src[b..]);
         }
         let module = dev.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -496,9 +496,9 @@ impl<'a> GpuKrc<'a> {
         let probe_buf = mk((PROBES * 32) as u64, st);
         let free_buf = mk(cell_cap as u64 * 4, st);
         let vis_buf = mk(cell_cap as u64 * 4, st);
-        // débruiteur : historique, deux tampons de travail, G-buffer précédent (2 vec4 par pixel)
+        // denoiser: history, two work buffers, previous G-buffer (2 vec4 per pixel)
         let dn_bufs = [16u64, 16, 16, 32].map(|b| mk(len as u64 * b, st));
-        // SHaRC : clés 64 bits, verrous, accumulation (uint4), résolu (half4 + 2 u32)
+        // SHaRC: 64-bit keys, locks, accumulation (uint4), resolved (half4 + 2 u32)
         let sh_bufs = [8u64, 4, 16, 16].map(|b| mk(sh_cap as u64 * b, st));
         let accel = tri.map(|t| Accel::new(gpu, t));
         let sampler = dev.create_sampler(&wgpu::SamplerDescriptor {
@@ -510,7 +510,7 @@ impl<'a> GpuKrc<'a> {
             mipmap_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
-        // mode jeu : partie spéculaire de l'image (courante, historique, travail)
+        // game mode: specular part of the image (current, history, work)
         let spec_bufs = [16u64, 16, 16].map(|b| mk(len as u64 * b, st));
         let n_binds = if accel.is_some() { 2 } else { 1 };
         let binds = (0..n_binds)
@@ -580,8 +580,8 @@ impl<'a> GpuKrc<'a> {
             n_post: 16.0,
             s2_hist: true,
             zero_cap: true,
-            // KRC v2 (RESULTATS §13) : rééchantillonnage, a priori du niveau voisin, démodulation,
-            // cellules de 8 px, qualité cible 5 %
+            // KRC v2 (RESULTS §13): resampling, prior from the neighbouring level, demodulation,
+            // 8 px cells, target quality 5 %
             resample: true,
             cell_px: 8.0,
             rec_every: 1,
@@ -621,7 +621,7 @@ impl<'a> GpuKrc<'a> {
         }
     }
 
-    /// Change la caméra (même résolution). Les cellules sont dans l'espace monde : elles restent.
+    /// Changes the camera (same resolution). Cells are in world space: they stay.
     pub fn set_view(&mut self, v: View) {
         assert!(v.w == self.view.w && v.h == self.view.h);
         self.view = v;
@@ -679,7 +679,7 @@ impl<'a> GpuKrc<'a> {
         }
     }
 
-    /// Une frame complète, scène de boîtes. `t` : indice de frame (graines, exploration).
+    /// A full frame, box scene. `t`: frame index (seeds, exploration).
     pub fn frame(&mut self, scene: &Scene, prev: &Scene, ev: Option<&Event>, t: u32) -> GpuFrame {
         let gev = ev.map(|e| GpuEvent {
             words: event_words(e),
@@ -698,10 +698,10 @@ impl<'a> GpuKrc<'a> {
         self.run_frame(b.len(), &l, &lp, gev.as_ref(), t)
     }
 
-    /// Une frame complète, scène en triangles : TLAS de la frame reconstruite (la précédente
-    /// est gardée pour les chemins corrélés), événement détecté et décrit sur place.
+    /// A full frame, triangle scene: the frame's TLAS rebuilt (the previous one
+    /// is kept for correlated paths), event detected and described on the spot.
     pub fn frame_tri(&mut self, scene: &TriScene, prev: &TriScene, t: u32) -> GpuFrame {
-        let accel = self.accel.as_mut().expect("scène en triangles");
+        let accel = self.accel.as_mut().expect("triangle scene");
         self.bind_idx = 1 - self.bind_idx;
         accel.build_tlas(self.gpu, scene, self.bind_idx);
         let ev = if self.sharc { None } else { self.tri_event(prev, scene, t) };
@@ -711,8 +711,8 @@ impl<'a> GpuKrc<'a> {
         self.run_frame(0, &l, &lp, ev.as_ref(), t)
     }
 
-    /// Événement entre deux états d'une scène en triangles : instances déplacées (AABB balayée),
-    /// lampes commutées (sondes tracées sur GPU depuis la scène où la lampe est allumée).
+    /// Event between two states of a triangle scene: moved instances (swept AABB),
+    /// switched lamps (probes traced on the GPU from the scene where the lamp is on).
     fn tri_event(&mut self, prev: &TriScene, cur: &TriScene, t: u32) -> Option<GpuEvent> {
         let g = self.grid;
         let mut words = vec![0u32; 162];
@@ -764,8 +764,8 @@ impl<'a> GpuKrc<'a> {
         Some(GpuEvent { words, geometry, lights, light_w, probe_rays })
     }
 
-    /// Rayons-sondes depuis une lampe, tracés sur GPU (`sel` 0 : scène courante, 1 : précédente).
-    /// Renvoie (point d'impact, luminance de l'albédo) des sondes qui touchent la géométrie.
+    /// Probe rays from a lamp, traced on the GPU (`sel` 0: current scene, 1: previous).
+    /// Returns (hit point, albedo luminance) of the probes that hit the geometry.
     pub fn probes(&mut self, l: &crate::scene::Light, sel: u32, seed: u64) -> Vec<(V3, f64)> {
         let mut rng = Rng::new(seed);
         let rays: Vec<(V3, V3)> = (0..PROBES)
@@ -777,7 +777,7 @@ impl<'a> GpuKrc<'a> {
         self.trace_rays(&rays, sel).into_iter().filter_map(|h| h.map(|(p, a)| (p, a.lum()))).collect()
     }
 
-    /// Premier impact (point, albédo) de rayons quelconques (au plus PROBES), sur GPU.
+    /// First hit (point, albedo) of arbitrary rays (at most PROBES), on the GPU.
     pub fn trace_rays(&mut self, rays_in: &[(V3, V3)], sel: u32) -> Vec<Option<(V3, V3)>> {
         assert!(rays_in.len() <= PROBES);
         let mut rays = vec![[0.0f32, -1e6, 0.0, 0.0]; PROBES * 2];
@@ -813,9 +813,9 @@ impl<'a> GpuKrc<'a> {
             .collect()
     }
 
-    /// Image de référence (triangles) : `spp` chemins par pixel, sans cache.
+    /// Reference image (triangles): `spp` paths per pixel, without a cache.
     pub fn reference_tri(&mut self, scene: &TriScene, spp: u32) -> (Vec<V3>, Vec<u8>) {
-        let accel = self.accel.as_mut().expect("scène en triangles");
+        let accel = self.accel.as_mut().expect("triangle scene");
         accel.build_tlas(self.gpu, scene, self.bind_idx);
         let l = lights_to_gpu(&scene.lights, &[]);
         let q = &self.gpu.queue;
@@ -824,7 +824,7 @@ impl<'a> GpuKrc<'a> {
         let len = self.view.len() as u32;
         let chunk = 64u32;
         for pass in 0..spp.div_ceil(chunk) {
-            // ref_reg : référence avec la régularisation des chemins du mode jeu
+            // ref_reg: reference with the game mode's path regularisation
             let fu = self.uniform(0, l.len(), pass, if self.ref_reg { F_GAME } else { 0 }, 0, 0, chunk.min(spp - pass * chunk));
             q.write_buffer(&self.bufs[0], 0, bytemuck::bytes_of(&fu));
             let mut enc = dev.create_command_encoder(&Default::default());
@@ -840,7 +840,7 @@ impl<'a> GpuKrc<'a> {
             q.submit(Some(enc.finish()));
             dev.poll(wgpu::Maintain::Wait);
         }
-        // genre des pixels : passe d'affichage sur un cache vide (lampes : émission)
+        // kind of pixels: display pass on an empty cache (lamps: emission)
         let fu = self.uniform(0, l.len(), 0, 0, 0, 0, 0);
         q.write_buffer(&self.bufs[0], 0, bytemuck::bytes_of(&fu));
         let mut enc = dev.create_command_encoder(&Default::default());
@@ -860,7 +860,7 @@ impl<'a> GpuKrc<'a> {
         (px, gb)
     }
 
-    /// Genre des pixels du G-buffer courant (0 vide, 1 lampe, 2 surface).
+    /// Kind of the current G-buffer's pixels (0 empty, 1 lamp, 2 surface).
     fn read_gbuffer_kinds(&self) -> Vec<u8> {
         let dev = &self.gpu.device;
         let len = self.view.len();
@@ -915,8 +915,8 @@ impl<'a> GpuKrc<'a> {
             flags |= F_MULTI;
         }
         if self.game {
-            // F_INDIRECT (cellules « indirect seulement ») reste disponible mais n'est plus utilisé :
-            // il recalculait l'éclairage direct au sommet relu, bruité (voir JOURNAL v14)
+            // F_INDIRECT ("indirect only" cells) is still available but no longer used:
+            // it recomputed the direct lighting at the read-back vertex, noisily (see JOURNAL v14)
             flags |= if self.indirect_only { F_INDIRECT } else { F_DSPLIT };
             flags |= F_GAME;
         }
@@ -930,7 +930,7 @@ impl<'a> GpuKrc<'a> {
                 q.write_buffer(&self.bufs[14], 0, bytemuck::cast_slice(&e.words));
             }
         } else if let Some(p) = &self.pending {
-            // pas de nouvel événement : on continue l'événement de lampe amorti (mots déjà sur le GPU)
+            // no new event: the amortised lamp event goes on (words already on the GPU)
             flags |= F_PENDING;
             ev_lights = p.lights;
         }
@@ -951,7 +951,7 @@ impl<'a> GpuKrc<'a> {
         plan.push(("reset_ctr", Dispatch::Direct((CTR as u32).div_ceil(64))));
         plan.push(("gbuffer", px));
         if self.method == Method::Sharc {
-            // Update (pixels clairsemés) → Resolve (toutes les entrées) → vue du cache ou Render
+            // Update (sparse pixels) → Resolve (every entry) → cache view or Render
             let d = self.sh.downscale;
             let blocks = self.view.w.div_ceil(d as usize) as u32 * self.view.h.div_ceil(d as usize) as u32;
             plan.push(("sharc_update", Dispatch::Direct(blocks.div_ceil(64))));
@@ -996,7 +996,7 @@ impl<'a> GpuKrc<'a> {
             plan.push(("prep_vis2", Dispatch::Direct(1)));
             plan.push(("evict_sweep", Dispatch::Direct(self.cell_cap.div_ceil(8 * 64))));
             if self.game {
-                // reflets : nourrissent les cellules hors champ, résolues dans la même frame
+                // reflections: feed off-screen cells, resolved in the same frame
                 plan.push(("krc_refl", px));
                 plan.push(("prep_vis2", Dispatch::Direct(1)));
             }
@@ -1065,7 +1065,7 @@ impl<'a> GpuKrc<'a> {
             b.unmap();
         }
         let ms = self.period_ns as f64 * 1e-6;
-        // événement de lampe dont il reste des cellules à traiter : on le garde pour la frame suivante
+        // lamp event with cells left to process: it is kept for the next frame
         self.pending = if ctr[18] > 0 { ev.cloned().or(self.pending.take()) } else { None };
         self.rebuild = ctr[C_TOMB] as u64 * 4 > self.table_mask as u64 + 1;
         self.clock += 1;
@@ -1103,7 +1103,7 @@ impl<'a> GpuKrc<'a> {
     }
 }
 
-/// `krc gpubench` : temps GPU par frame du pipeline complet, en montant en résolution.
+/// `krc gpubench`: GPU time per frame of the full pipeline, increasing the resolution.
 pub fn bench(gpu: &Gpu) {
     use crate::methods::event;
     use crate::scene::{build, state_at, FRAMES};
@@ -1121,7 +1121,7 @@ pub fn bench(gpu: &Gpu) {
             let mut prev_scene = build(&prev_state, 2);
             let mut per_frame: Vec<(u32, f64, u32)> = Vec::new();
             let mut passes: Vec<(&'static str, f64, usize)> = Vec::new();
-            // une séquence de chauffe (fréquences GPU, caches), puis la séquence mesurée
+            // a warm-up sequence (GPU clocks, caches), then the measured sequence
             for t in 0..2 * FRAMES {
                 let warm = t < FRAMES;
                 let t = t % FRAMES;
@@ -1129,7 +1129,7 @@ pub fn bench(gpu: &Gpu) {
                 let scene = build(&state, 2);
                 let ev = event(&prev_state, &state, &prev_scene, &scene, t);
                 let f = krc.frame(&scene, &prev_scene, ev.as_ref(), t);
-                assert_eq!(f.overflow, 0, "table saturée ({} cellules)", f.cells);
+                assert_eq!(f.overflow, 0, "table full ({} cells)", f.cells);
                 prev_state = state;
                 prev_scene = scene;
                 if warm {
@@ -1148,10 +1148,10 @@ pub fn bench(gpu: &Gpu) {
             }
             let mut line = format!("{}×{} {name:<9}", world.w, world.h);
             for (phase, a, b) in
-                [("statique", 20u32, 40u32), ("boite", 40, 64), ("lampe_on", 80, 81), ("lampe_off", 100, 101), ("tout", 0, 120)]
+                [("static", 20u32, 40u32), ("box", 40, 64), ("lamp_on", 80, 81), ("lamp_off", 100, 101), ("all", 0, 120)]
             {
                 let sel: Vec<&(u32, f64, u32)> = per_frame.iter().filter(|p| p.0 >= a && p.0 < b).collect();
-                // médiane : robuste aux fluctuations de fréquence du GPU
+                // median: robust to the GPU's clock fluctuations
                 let mut v: Vec<f64> = sel.iter().map(|p| p.1).collect();
                 v.sort_by(|x, y| x.total_cmp(y));
                 let mean = v[v.len() / 2];
@@ -1168,7 +1168,7 @@ pub fn bench(gpu: &Gpu) {
             if s == 10 {
                 let mut p: Vec<String> = passes.iter().map(|(n, ms, c)| format!("{n} {:.3}", ms / *c as f64)).collect();
                 p.sort();
-                println!("   passes (ms, moyenne sur les frames où elles tournent) : {}", p.join(", "));
+                println!("   passes (ms, mean over the frames where they run): {}", p.join(", "));
             }
         }
     }
@@ -1176,8 +1176,8 @@ pub fn bench(gpu: &Gpu) {
     std::fs::write("results/gpu/bench_pipeline.csv", csv).unwrap();
 }
 
-/// `krc drift [cycles]` : la séquence de 120 frames répétée ; erreur mesurée aux mêmes instants
-/// de chaque cycle pour détecter une dérive (stagnation f32, saturation, dette, table).
+/// `krc drift [cycles]`: the 120-frame sequence repeated; error measured at the same moments
+/// of each cycle to detect a drift (f32 stagnation, saturation, debt, table).
 pub fn drift(gpu: &Gpu, cycles: u32, refs: &std::collections::HashMap<String, Vec<V3>>) {
     use crate::methods::event;
     use crate::render::{errors, gbuffer, Px};
@@ -1220,7 +1220,7 @@ pub fn drift(gpu: &Gpu, cycles: u32, refs: &std::collections::HashMap<String, Ve
                     row.push(rel);
                     if t == 119 && (cycle % 10 == 9 || cycle == 0) {
                         println!(
-                            "{name} cycle {cycle:>3} : relMSE aux frames {probe_frames:?} = {} | cellules {} | n max {:.0} | dette {} | débordements {}",
+                            "{name} cycle {cycle:>3}: relMSE at frames {probe_frames:?} = {} | cells {} | max n {:.0} | debt {} | overflows {}",
                             row.iter().map(|r| format!("{r:.2e}")).collect::<Vec<_>>().join(" "),
                             f.cells,
                             f.max_n,
@@ -1241,7 +1241,7 @@ pub fn drift(gpu: &Gpu, cycles: u32, refs: &std::collections::HashMap<String, Ve
         }
         let m = |v: &Vec<f64>| v.iter().sum::<f64>() / v.len() as f64;
         println!(
-            "{name} : relMSE moyen aux instants sondés, 10 premiers cycles {:.3e} -> 10 derniers {:.3e}",
+            "{name}: mean relMSE at the probed moments, first 10 cycles {:.3e} -> last 10 {:.3e}",
             m(&first),
             m(&last)
         );
@@ -1253,7 +1253,7 @@ pub fn drift(gpu: &Gpu, cycles: u32, refs: &std::collections::HashMap<String, Ve
 #[derive(Clone, Copy)]
 enum Dispatch {
     Direct(u32),
-    /// décalage (octets) des arguments dans le buffer indirect
+    /// offset (bytes) of the arguments in the indirect buffer
     Indirect(u64),
 }
 
@@ -1261,7 +1261,7 @@ fn mix_seed(t: u32, j: usize) -> u64 {
     crate::math::mix64((t as u64) << 8 | j as u64)
 }
 
-/// Description d'un événement pour le GPU : régions fines, super-régions, magnitudes, poids des lampes.
+/// Description of an event for the GPU: fine regions, super-regions, magnitudes, lamp weights.
 fn event_words(e: &Event) -> Vec<u32> {
     let mut v = vec![0u32; 162];
     for k in 0..WORDS {

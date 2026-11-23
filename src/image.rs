@@ -1,4 +1,4 @@
-//! Écriture PNG minimale (deflate « stored », sans compression) et tone mapping.
+//! Minimal PNG writer (deflate "stored", no compression) and tone mapping.
 use crate::math::V3;
 use std::io::Write;
 
@@ -65,5 +65,5 @@ pub fn save(path: &str, w: usize, h: usize, img: &[V3]) {
     for v in img {
         rgb.extend_from_slice(&[srgb(v.x), srgb(v.y), srgb(v.z)]);
     }
-    write_png(path, w, h, &rgb).expect("écriture PNG");
+    write_png(path, w, h, &rgb).expect("PNG write");
 }

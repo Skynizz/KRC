@@ -1,15 +1,15 @@
-// KRC entièrement sur GPU : un pipeline de passes compute par frame.
-// Mêmes règles que methods.rs (krc_energy, dépendances L2), avec deux simplifications
-// documentées : allocation de Neyman par bisection du seuil de gain (équivalent continu du
-// glouton) et un pixel de référence par cellule et par frame (tiré uniformément).
+// KRC entirely on the GPU: a pipeline of compute passes per frame.
+// Same rules as methods.rs (krc_energy, L2 dependencies), with two documented
+// simplifications: Neyman allocation by bisection of the gain threshold (continuous equivalent of the
+// greedy one) and one reference pixel per cell per frame (drawn uniformly).
 
-// <grille> (remplacée par la grille de la scène, cf. Grid::wgsl)
+// <grid> (replaced by the scene's grid, see Grid::wgsl)
 const REGION: f32 = 0.6;
 const ORIGIN: vec3<f32> = vec3<f32>(-0.2, -0.2, -0.2);
 const DIMS: vec3<i32> = vec3<i32>(72, 6, 8);
 const SDIV: vec3<i32> = vec3<i32>(4, 6, 4);
 const SDIMS: vec3<i32> = vec3<i32>(18, 1, 2);
-// </grille>
+// </grid>
 const MAX_DEPTH: u32 = 8u;
 const MISS_LEN: f32 = 30.0;
 const EPS: f32 = 1e-4;
@@ -30,12 +30,12 @@ const DEP_WINDOW: u32 = 64u;
 const DEBT_RATE: f32 = 0.5;
 const EMA_MIN: f32 = 0.015625;
 const MAX_PER_CELL: u32 = 64u;
-const N_MAX: f32 = 1024.0; // historique maximal d'une cellule (test de dérive)
-const N_POST: f32 = 64.0;  // poids max d'une estimation corrigée (sa variance vient de 8 tirages) ; réglé par le test de dérive
+const N_MAX: f32 = 1024.0; // maximum history of a cell (drift test)
+const N_POST: f32 = 64.0;  // max weight of a corrected estimate (its variance comes from 8 draws); tuned by the drift test
 
 // compteurs (ctr)
 const C_CELLS: u32 = 0u;
-const C_TASKS: u32 = 1u;     // curseur d'écriture dans `tasks`
+const C_TASKS: u32 = 1u;     // write cursor in `tasks`
 const C_SURF: u32 = 2u;
 const C_SUSPECTS: u32 = 3u;
 const C_DPATHS: u32 = 4u;
@@ -44,31 +44,31 @@ const C_DZERO: u32 = 6u;
 const C_HARD: u32 = 7u;
 const C_SAFETY: u32 = 8u;
 const C_DEBT: u32 = 9u;
-const C_D1: u32 = 10u;       // tâches delta du 1er tour : [0, C_D1)
-const C_D2: u32 = 11u;       // fin du 2e tour
-const C_REG0: u32 = 12u;     // début des tâches ordinaires
+const C_D1: u32 = 10u;       // delta tasks of the 1st round: [0, C_D1)
+const C_D2: u32 = 11u;       // end of the 2nd round
+const C_REG0: u32 = 12u;     // start of the ordinary tasks
 const C_VISIBLE: u32 = 13u;
 const C_MATURE: u32 = 14u;
 const C_OVERFLOW: u32 = 15u;
 const C_EXPLORE: u32 = 16u;
-const C_MAXN: u32 = 17u;     // max des n des cellules (bits f32 positifs : ordre préservé)
-const C_PENDING: u32 = 18u;  // cellules encore en attente de leurs chemins corrélés
-const C_DUSED: u32 = 19u;    // chemins corrélés réservés dans la frame (plafond d'amortissement)
-const C_FREE: u32 = 20u;     // cellules libres dans free_list (persistant)
-const C_TOMB: u32 = 21u;     // pierres tombales dans la table de hachage (persistant)
-const C_EVICT: u32 = 22u;    // cellules évincées dans la frame
-const C_POP: u32 = 23u;      // cellules prises dans la liste libre pendant l'insertion
-const C_NVIS: u32 = 24u;     // cellules visibles dans la frame (vis_list)
-const C_SEGS: u32 = 25u;     // segments tracés par les chemins ordinaires
-const C_RSHIT: u32 = 26u;    // chemins ordinaires arrêtés sur le cache
+const C_MAXN: u32 = 17u;     // max of the cells' n (positive f32 bits: order preserved)
+const C_PENDING: u32 = 18u;  // cells still waiting for their correlated paths
+const C_DUSED: u32 = 19u;    // correlated paths reserved in the frame (amortisation cap)
+const C_FREE: u32 = 20u;     // free cells in free_list (persistent)
+const C_TOMB: u32 = 21u;     // tombstones in the hash table (persistent)
+const C_EVICT: u32 = 22u;    // cells evicted in the frame
+const C_POP: u32 = 23u;      // cells taken from the free list during insertion
+const C_NVIS: u32 = 24u;     // visible cells in the frame (vis_list)
+const C_SEGS: u32 = 25u;     // segments traced by ordinary paths
+const C_RSHIT: u32 = 26u;    // ordinary paths stopped on the cache
 const TOMB: u32 = 0xffffffffu;
-// Caméra mobile : une cellule invisible depuis STALE_FRAMES frames est évincée (même règle que
-// le staleFrameNumMax de l'exemple SHaRC de NVIDIA, 60).
+// Moving camera: a cell invisible for STALE_FRAMES frames is evicted (same rule as
+// the staleFrameNumMax of NVIDIA's SHaRC sample, 60).
 const STALE_FRAMES: u32 = 60u;
 const C_HIST: u32 = 32u;     // 64 cases
-const C_SCAN: u32 = 96u;     // 3 × 32 sommes de quotas candidates (trois balayages)
+const C_SCAN: u32 = 96u;     // 3 × 32 candidate quota sums (three sweeps)
 
-// accumulateurs atomiques par cellule (acc), en mots
+// atomic accumulators per cell (acc), in words
 const ACC: u32 = 52u;
 const A_FOOT: u32 = 0u;
 const A_REF: u32 = 1u;
@@ -76,9 +76,9 @@ const A_FN: u32 = 2u;
 const A_FR: u32 = 3u;        // 3, 4, 5 : Σ rgb
 const A_FL: u32 = 6u;
 const A_FL2: u32 = 7u;
-const A_DEPS: u32 = 8u;      // 8, 9 : super-régions traversées (fenêtre courante)
-const A_NS: u32 = 10u;       // échantillons dans la fenêtre courante
-const A_FREQ: u32 = 11u;     // 11..28 : 36 compteurs u16 de sommets par super-région
+const A_DEPS: u32 = 8u;      // 8, 9: super-regions crossed (current window)
+const A_NS: u32 = 10u;       // samples in the current window
+const A_FREQ: u32 = 11u;     // 11..28: 36 u16 vertex counters per super-region
 const A_PM: u32 = 29u;
 const A_PDIFF: u32 = 30u;
 const A_PAFF: u32 = 31u;
@@ -90,48 +90,48 @@ const A_PXL2: u32 = 40u;
 const A_PYL2: u32 = 41u;
 const A_PXYL: u32 = 42u;
 const A_SUSP: u32 = 43u;
-const A_FD: u32 = 44u;        // 44, 45, 46 : Σ part directe au premier sommet (mode jeu)
-const A_PD: u32 = 47u;        // 47, 48, 49 : Σ (direct nouveau − direct ancien) des chemins corrélés
+const A_FD: u32 = 44u;        // 44, 45, 46: Σ direct share at the first vertex (game mode)
+const A_PD: u32 = 47u;        // 47, 48, 49: Σ (new direct − old direct) of the correlated paths
 
 // fr.flags
 const F_EVENT: u32 = 1u;
 const F_GEOMETRY: u32 = 2u;
 const F_SHARC: u32 = 4u;
-const F_PENDING: u32 = 8u;   // frame sans nouvel événement, mais avec des cellules en attente
+const F_PENDING: u32 = 8u;   // frame without a new event, but with cells waiting
 const F_AMORTIZE: u32 = 16u;
 const F_S2HIST: u32 = 32u;
 const F_ZCAP: u32 = 64u;
-// rééchantillonnage du cache (comme SHaRC) : un chemin ordinaire s'arrête au 1er ou 2e rebond
-// sur une cellule existante et prend sa moyenne
+// cache resampling (like SHaRC): an ordinary path stops at the 1st or 2nd bounce
+// on an existing cell and takes its mean
 const F_RESAMPLE: u32 = 128u;
 const RESAMPLE_N_MIN: f32 = 2.0;
-// réutilisation des sommets (comme SHaRC) : la radiance du reste du chemin au 1er rebond est
-// aussi un échantillon de la cellule visible qui s'y trouve
+// vertex reuse (like SHaRC): the radiance of the rest of the path at the 1st bounce is
+// also a sample of the visible cell located there
 const F_REUSE: u32 = 256u;
-// démodulation matériau (comme SHARC_MATERIAL_DEMODULATION) : les cellules stockent la radiance
-// divisée par l'albédo du point de départ, l'affichage la remultiplie par l'albédo du pixel
+// material demodulation (like SHARC_MATERIAL_DEMODULATION): cells store the radiance
+// divided by the albedo of the starting point, the display multiplies it back by the pixel's albedo
 const F_DEMOD: u32 = 512u;
-// cellule neuve initialisée depuis la cellule du niveau voisin au même endroit (la caméra qui
-// avance fait changer les surfaces de niveau ; comme SHARC_BLEND_ADJACENT_LEVELS)
+// new cell initialised from the cell of the neighbouring level at the same place (a camera
+// moving forward makes surfaces change level; like SHARC_BLEND_ADJACENT_LEVELS)
 const F_SEED: u32 = 1024u;
-// cellules de support hors champ (comme les voxels SHaRC aux sommets secondaires) : un chemin
-// ordinaire qui ne trouve pas de cellule mûre au sommet de rééchantillonnage en crée une (ou
-// nourrit la jeune cellule trouvée) avec la radiance de la suite de son chemin
+// off-screen support cells (like SHaRC voxels at secondary vertices): an ordinary
+// path that finds no mature cell at the resampling vertex creates one (or
+// feeds the young cell found) with the radiance of the rest of its path
 const F_SUPPORT: u32 = 2048u;
-// cache à deux résolutions : les K/2 premiers emplacements d'un pixel visent des cellules fines,
-// les K/2 suivants des cellules 2× plus grandes ; chaque chemin nourrit les deux niveaux ;
-// l'affichage passe du grossier au fin quand le fin a assez d'échantillons
+// two-resolution cache: a pixel's first K/2 slots target fine cells,
+// the next K/2 cells 2× larger; each path feeds both levels;
+// the display moves from coarse to fine when the fine one has enough samples
 const F_MULTI: u32 = 4096u;
-// les cellules ne stockent que la lumière indirecte (le direct est calculé par pixel)
+// cells store only indirect light (direct is computed per pixel)
 const F_INDIRECT: u32 = 8192u;
-// mode jeu : les cellules gardent la radiance totale (relue par le rééchantillonnage, comme
-// SHaRC) et, à part, la moyenne de leur part directe ; l'image finale prend l'indirect
-// = total − direct moyen, et le direct par pixel
+// game mode: cells keep the total radiance (read back by resampling, like
+// SHaRC) and, separately, the mean of their direct share; the final image takes the indirect
+// = total − mean direct, and the per-pixel direct
 const F_DSPLIT: u32 = 16384u;
-const F_GAME: u32 = 32768u;   // pipeline de jeu (parties diffuse / spéculaire séparées, game.wgsl)
-// chemins corrélés arrêtés eux aussi sur le cache au 1er ou 2e rebond : les deux chemins de la
-// paire lisent la même valeur, qui s'annule dans la différence ; il manque seulement l'effet de
-// l'événement au-delà du point d'arrêt (second ordre, corrigé aux frames suivantes)
+const F_GAME: u32 = 32768u;   // game pipeline (separate diffuse / specular parts, game.wgsl)
+// correlated paths also stopped on the cache at the 1st or 2nd bounce: both paths of the
+// pair read the same value, which cancels out in the difference; only the effect of
+// the event beyond the stopping point is missing (second order, corrected over the next frames)
 const F_DRS: u32 = 65536u;
 const FIREFLY_K: f32 = 100.0;
 const FIREFLY_K_YOUNG: f32 = 20.0;
@@ -146,7 +146,7 @@ const SEED_N: f32 = 8.0;
 fn demod(a: vec3<f32>) -> vec3<f32> {
     if ((fr.flags & F_DEMOD) == 0u) { return vec3<f32>(1.0); }
     return max(a, vec3<f32>(0.05));
-}     // lampe : cellule sans différence mesurée → historique plafonné   // variance par échantillon après correction : au moins celle de l'historique // chemins corrélés plafonnés à DELTA_CAP chemin/pixel par frame
+}     // lamp: cell without a measured difference → capped history   // per-sample variance after correction: at least the history's // correlated paths capped at DELTA_CAP path/pixel per frame
 const DELTA_CAP: f32 = 1.0;
 
 struct Frame {
@@ -156,21 +156,21 @@ struct Frame {
     eye: vec3<f32>, px_angle: f32,
     fwd: vec3<f32>, th: f32,
     right: vec3<f32>, tv: f32,
-    up: vec3<f32>, ppp: f32,  // budget : chemins par pixel de surface et par frame
-    clock: u32,      // compteur de frames monotone (éviction), indépendant de `frame` (graines)
-    rel_cap: f32,    // variance relative d'allocation plafonnée à rel_cap × médiane (0 : aucun plafond)
-    eps_energy: f32, // seuil de l'effet énergétique attendu (fraction de la luminance de la cellule)
-    n_post: f32,     // poids max d'une estimation corrigée (0 : N_POST)
-    // SHaRC officiel (sharc.wgsl)
+    up: vec3<f32>, ppp: f32,  // budget: paths per surface pixel per frame
+    clock: u32,      // monotonic frame counter (eviction), independent of `frame` (seeds)
+    rel_cap: f32,    // relative allocation variance capped at rel_cap × median (0: no cap)
+    eps_energy: f32, // threshold of the expected energy effect (fraction of the cell's luminance)
+    n_post: f32,     // max weight of a corrected estimate (0: N_POST)
+    // official SHaRC (sharc.wgsl)
     sh_cam_prev: vec3<f32>, sh_scene_scale: f32,
     sh_rscale: f32, sh_cap: u32, sh_accum: u32, sh_stale: u32,
-    sh_down: u32, cell_px: f32, rec_every: u32, tau: f32, // cell_px : largeur d'une cellule en pixels ; rec_every : 1 chemin ordinaire sur N enregistre ses dépendances
-    // caméra de la frame précédente (reprojection du débruiteur, game.wgsl)
-    prev_eye: vec3<f32>, m_light: u32,     // m_light : chemins corrélés par cellule pour une lampe (0 : M_DELTA)
-    prev_fwd: vec3<f32>, debt_rate: f32,   // part du budget qui rembourse les chemins d'événement (< 0 : DEBT_RATE)
-    prev_right: vec3<f32>, reset_ratio: f32, // changement relatif au-delà duquel on repart de zéro (0 : jamais)
-    prev_up: vec3<f32>, dn_gamma: f32,     // bornage de l'historique du débruiteur (0 : DN_GAMMA)
-    sh_spp: u32, krc_spp: u32, dbg: u32, off: u32, // off : protections désactivées (1 anti-lucioles, 2 moyenne tronquée, 4 écrêtage des cellules, 8 régularisation) // SHaRC : chemins par pixel de la passe Render ; KRC : estimations du direct par pixel (mode jeu)
+    sh_down: u32, cell_px: f32, rec_every: u32, tau: f32, // cell_px: width of a cell in pixels; rec_every: 1 ordinary path in N records its dependencies
+    // previous frame's camera (denoiser reprojection, game.wgsl)
+    prev_eye: vec3<f32>, m_light: u32,     // m_light: correlated paths per cell for a lamp (0: M_DELTA)
+    prev_fwd: vec3<f32>, debt_rate: f32,   // share of the budget that pays back event paths (< 0: DEBT_RATE)
+    prev_right: vec3<f32>, reset_ratio: f32, // relative change beyond which it restarts from zero (0: never)
+    prev_up: vec3<f32>, dn_gamma: f32,     // denoiser history clamp (0: DN_GAMMA)
+    sh_spp: u32, krc_spp: u32, dbg: u32, off: u32, // off: protections disabled (1 anti-firefly, 2 truncated mean, 4 cell clamping, 8 regularisation) // SHaRC: paths per pixel of the Render pass; KRC: direct estimates per pixel (game mode)
 };
 struct Box { mn: vec3<f32>, p0: f32, mx: vec3<f32>, p1: f32, albedo: vec3<f32>, p2: f32 };
 struct Light { center: vec3<f32>, hx: f32, hz: f32, on: f32, power: f32, toggle_w: f32, emission: vec3<f32>, p0: f32 };
@@ -178,9 +178,9 @@ struct Gpx { p: vec3<f32>, kind: u32, n: vec3<f32>, dist: f32, albedo: vec3<f32>
 struct Cell {
     n: f32, lmean: f32, m2: f32, last: u32,
     mean: vec3<f32>, rn: f32,
-    rl: f32, rm2: f32, ns_prev: u32, seen: u32, // seen : dernière frame (clock) où la cellule était visible
-    deps_prev: vec2<u32>, key: u32, slot: u32,   // slot : indice dans la table + 1 (0 : cellule libre)
-    dmean: vec3<f32>, p2: f32,                   // moyenne de la part directe au premier sommet (mode jeu)
+    rl: f32, rm2: f32, ns_prev: u32, seen: u32, // seen: last frame (clock) where the cell was visible
+    deps_prev: vec2<u32>, key: u32, slot: u32,   // slot: index in the table + 1 (0: free cell)
+    dmean: vec3<f32>, p2: f32,                   // mean of the direct share at the first vertex (game mode)
     freq_prev: array<u32, 18>,
 };
 
@@ -196,38 +196,38 @@ struct Cell {
 @group(0) @binding(11) var<storage, read_write> acc: array<atomic<u32>>;
 @group(0) @binding(12) var<storage, read_write> tasks: array<vec4<u32>>;
 @group(0) @binding(13) var<storage, read_write> image: array<vec4<f32>>;
-// événement : [0,108) régions fines, [108,110) super-régions, [110,146) magnitude par
-// super-région (f32), [146,162) poids des lampes (f32)
+// event: [0,108) fine regions, [108,110) super-regions, [110,146) magnitude per
+// super-region (f32), [146,162) lamp weights (f32)
 @group(0) @binding(14) var<storage, read> ev: array<u32>;
 @group(0) @binding(15) var<storage, read_write> scal: array<f32>; // 0 : λ, 1 : a priori, 2 : budget, 3-4 : bornes log2 λ
 @group(0) @binding(16) var<storage, read_write> ind: array<u32>; // arguments de dispatch indirect
-// résumé compact par cellule pour l'allocation : (empreinte, n, variance relative, tirage)
+// compact summary per cell for allocation: (footprint, n, relative variance, draw)
 @group(0) @binding(17) var<storage, read_write> qbuf: array<vec4<f32>>;
 @group(0) @binding(22) var<storage, read_write> free_list: array<u32>;
-// cellules visibles de la frame : l'allocation et la résolution ne parcourent qu'elles (en
-// caméra mobile, l'essentiel des cellules vivantes est hors champ)
+// visible cells of the frame: allocation and resolve walk only those (with a
+// moving camera, most live cells are off screen)
 @group(0) @binding(27) var<storage, read_write> vis_list: array<u32>;
 
 // ---------------------------------------------------------------- outils
 var<private> rng: u32;
-var<private> sel: u32;        // 0 : scène courante, 1 : scène précédente
+var<private> sel: u32;        // 0: current scene, 1: previous scene
 var<private> rec_on: bool;
 var<private> uni: bool;
 var<private> split: bool;
 var<private> m_trav: vec2<u32>;
 var<private> m_vsup: vec2<u32>;
 var<private> m_lights: u32;
-var<private> m_aff: bool;     // le chemin touche-t-il une région de l'événement ?
-var<private> resample: bool;  // chemins ordinaires seulement (jamais les chemins corrélés)
+var<private> m_aff: bool;     // does the path touch a region of the event?
+var<private> resample: bool;  // ordinary paths only (never correlated paths)
 var<private> rs_depth: u32;
-var<private> d0_l: vec3<f32>;   // contribution directe au premier sommet (mode indirect)
+var<private> d0_l: vec3<f32>;   // direct contribution at the first vertex (indirect mode)
 var<private> d0_dl: vec3<f32>;
-var<private> rs_stop: bool;     // mode indirect : cellule lue, on s'arrête après l'éclairage direct du sommet
-var<private> pm_wo: vec3<f32>;      // premier sommet de radiance() : direction de sortie, matériau
+var<private> rs_stop: bool;     // indirect mode: cell read, stop after the vertex's direct lighting
+var<private> pm_wo: vec3<f32>;      // first vertex of radiance(): outgoing direction, material
 var<private> pm_rough: f32;
 var<private> pm_metal: f32;
-var<private> pm_diffuse_only: bool; // cellules KRC : seul le lobe diffuse au premier sommet
-var<private> nee_spec_only: bool;   // sommet relu dans le cache : il manque seulement le spéculaire direct
+var<private> pm_diffuse_only: bool; // KRC cells: only the diffuse lobe at the first vertex
+var<private> nee_spec_only: bool;   // vertex read back from the cache: only the direct specular is missing
 var<private> n_segs: u32;
 var<private> sp_cell: u32;
 var<private> sp_prefix: vec3<f32>;
@@ -235,7 +235,7 @@ var<private> sp_beta: vec3<f32>;
 var<private> sp_albedo: vec3<f32>;
 var<private> rs_hit: bool;
 var<private> reuse: bool;
-var<private> ru_cell: u32;       // cellule du 1er rebond (0xffffffff : aucune)
+var<private> ru_cell: u32;       // cell of the 1st bounce (0xffffffff: none)
 var<private> ru_prefix: vec3<f32>;
 var<private> ru_beta: vec3<f32>;
 
@@ -257,8 +257,8 @@ fn seed_rng(a: u32, b: u32, c: u32) {
     rng = pcg(a ^ pcg(b ^ pcg(c + fr.seed)));
 }
 
-// sommes de radiance par cellule en virgule fixe (simple atomicAdd, comme SHaRC) : les boucles
-// de CAS flottant se bousculent quand des dizaines de chemins visent la même cellule
+// radiance sums per cell in fixed point (a plain atomicAdd, like SHaRC): float CAS
+// loops jostle when dozens of paths target the same cell
 const FX: f32 = 16384.0;
 fn add_fx(i: u32, v: f32) {
     let q = u32(max(v, 0.0) * FX + 0.5);
@@ -282,7 +282,7 @@ fn ld_f32(i: u32) -> f32 {
 fn n_lights() -> u32 { return fr.n_lights; }
 fn light_at(j: u32) -> Light { if (sel == 0u) { return lights[j]; } return lights_prev[j]; }
 
-// ---------------------------------------------------------------- régions
+// ---------------------------------------------------------------- regions
 fn cell_of(p: vec3<f32>) -> vec3<i32> {
     return clamp(vec3<i32>(floor((p - ORIGIN) / REGION)), vec3<i32>(0), DIMS - vec3<i32>(1));
 }
@@ -299,13 +299,13 @@ fn mark_vertex(p: vec3<f32>) {
     if (rec_on) { m_vsup = set2(m_vsup, super_of(cell_of(p))); }
 }
 
-// Grille des super-régions (dépendances stockées) : blocs de SDIV régions.
+// Super-region grid (stored dependencies): blocks of SDIV regions.
 const SUP: vec3<f32> = vec3<f32>(SDIV) * REGION;
 var<private> fine_dda: bool;
 
-// DDA : super-régions traversées (dépendances L2). Sur la grille fine (0,6 m) seulement quand il faut
-// aussi le test exact de contact avec l'événement (chemins corrélés) ; sinon sur la grille grossière,
-// ~4× moins de pas.
+// DDA: super-regions crossed (L2 dependencies). On the fine grid (0.6 m) only when the exact
+// contact test with the event is needed too (correlated paths); otherwise on the coarse grid,
+// ~4× fewer steps.
 fn mark_segment(a: vec3<f32>, b: vec3<f32>) {
     if (!rec_on) { return; }
     let d = b - a;
@@ -360,12 +360,12 @@ fn mark_segment(a: vec3<f32>, b: vec3<f32>) {
     }
 }
 
-// ---------------------------------------------------------------- géométrie
-// albedo : couleur de base ; rough ≥ 1 et metal = 0 : lambertien pur (scènes d'avant la vitrine)
+// ---------------------------------------------------------------- geometry
+// albedo: base colour; rough ≥ 1 and metal = 0: pure Lambertian (scenes from before the showcase)
 struct Hit { found: bool, t: f32, p: vec3<f32>, n: vec3<f32>, albedo: vec3<f32>, light: i32, rough: f32, metal: f32 };
 struct Occ { found: bool, t: f32 };
 
-// <geometrie> (boîtes alignées ; remplacé par la version triangles + ray query, cf. rt.rs)
+// <geometry> (axis-aligned boxes; replaced by the triangles + ray query version, see rt.rs)
 @group(0) @binding(1) var<storage, read> boxes: array<Box>;
 @group(0) @binding(3) var<storage, read> boxes_prev: array<Box>;
 
@@ -388,7 +388,7 @@ fn slab(mn: vec3<f32>, mx: vec3<f32>, o: vec3<f32>, inv: vec3<f32>) -> vec3<f32>
     return vec3<f32>(t0, min(thi.x, min(thi.y, thi.z)), axis);
 }
 
-// premier impact sur la géométrie (sans les lampes)
+// first hit on the geometry (without the lamps)
 fn scene_hit(o: vec3<f32>, d: vec3<f32>) -> Hit {
     var h: Hit;
     h.found = false;
@@ -433,9 +433,9 @@ fn occluder(o: vec3<f32>, d: vec3<f32>, tmax: f32) -> Occ {
     }
     return r;
 }
-// </geometrie>
+// </geometry>
 
-// premier impact, lampes comprises
+// first hit, lamps included
 fn intersect(o: vec3<f32>, d: vec3<f32>) -> Hit {
     var h = scene_hit(o, d);
     for (var j = 0u; j < n_lights(); j++) {
@@ -459,16 +459,16 @@ fn intersect(o: vec3<f32>, d: vec3<f32>) -> Hit {
     return h;
 }
 
-// ---------------------------------------------------------------- matériaux (vitrine)
-// BRDF : lambertien (1 − métal)·base/π + GGX (Smith, Schlick, F0 = mix(0,04, base, métal)).
-// Un matériau lambertien pur (rough ≥ 1, metal = 0) suit exactement l'ancien chemin de code,
-// mêmes tirages aléatoires compris.
+// ---------------------------------------------------------------- materials (showcase)
+// BRDF: Lambertian (1 − metal)·base/π + GGX (Smith, Schlick, F0 = mix(0.04, base, metal)).
+// A pure Lambertian material (rough ≥ 1, metal = 0) follows exactly the old code path,
+// random draws included.
 fn g_rough(g: Gpx) -> f32 { return select(1.0, unpack2x16unorm(g.p0).x, g.kind == 2u); }
 fn g_metal(g: Gpx) -> f32 { return select(0.0, unpack2x16unorm(g.p0).y, g.kind == 2u); }
 fn is_diffuse(rough: f32, metal: f32) -> bool { return rough >= 0.999 && metal <= 0.0; }
-// régularisation des chemins (mode jeu, les deux méthodes ; la référence reste exacte) : au-delà
-// du premier sommet, une surface brillante est traitée comme rugueuse d'au moins PATH_REG ; les
-// caustiques (diffus → miroir → petite lampe), quasi impossibles à échantillonner, disparaissent
+// path regularisation (game mode, both methods; the reference stays exact): beyond
+// the first vertex, a glossy surface is treated as rough of at least PATH_REG; the
+// caustics (diffuse → mirror → small lamp), almost impossible to sample, disappear
 const PATH_REG: f32 = 0.3;
 fn reg_rough(r: f32) -> f32 {
     if ((fr.flags & F_GAME) == 0u || (fr.off & 8u) != 0u) { return r; }
@@ -481,7 +481,7 @@ fn ggx_a2(rough: f32) -> f32 { let a = max(rough * rough, 0.002); return a * a; 
 fn ggx_d(nh: f32, a2: f32) -> f32 { let t = nh * nh * (a2 - 1.0) + 1.0; return a2 / (PI * t * t); }
 fn smith_g1(nv: f32, a2: f32) -> f32 { return 2.0 * nv / (nv + sqrt(a2 + (1.0 - a2) * nv * nv)); }
 
-// BRDF × cos, séparée en parties diffuse et spéculaire
+// BRDF × cos, split into diffuse and specular parts
 struct Brdf2 { d: vec3<f32>, s: vec3<f32> };
 fn brdf_cos(n: vec3<f32>, wo: vec3<f32>, wi: vec3<f32>, base: vec3<f32>, rough: f32, metal: f32) -> Brdf2 {
     var r: Brdf2;
@@ -507,7 +507,7 @@ fn tangent_frame(n: vec3<f32>) -> mat3x3<f32> {
     return mat3x3<f32>(t, cross(n, t), n);
 }
 
-// probabilité de tirer le lobe spéculaire
+// probability of drawing the specular lobe
 fn spec_prob(n: vec3<f32>, wo: vec3<f32>, base: vec3<f32>, rough: f32, metal: f32) -> f32 {
     if (is_diffuse(rough, metal)) { return 0.0; }
     let fs = lum(fresnel(f0_of(base, metal), max(dot(n, wo), 0.0)));
@@ -515,7 +515,7 @@ fn spec_prob(n: vec3<f32>, wo: vec3<f32>, base: vec3<f32>, rough: f32, metal: f3
     return clamp(fs / max(fs + fd, 1e-4), 0.1, 0.95);
 }
 
-// direction GGX (demi-vecteur tiré selon D), réfléchie autour du demi-vecteur
+// GGX direction (half-vector drawn according to D), reflected around the half-vector
 fn ggx_dir(n: vec3<f32>, wo: vec3<f32>, rough: f32) -> vec3<f32> {
     let a2 = ggx_a2(rough);
     let u1 = rnd();
@@ -534,7 +534,7 @@ fn pdf_spec(n: vec3<f32>, wo: vec3<f32>, wi: vec3<f32>, rough: f32) -> f32 {
     return ggx_d(max(dot(n, h), 0.0), ggx_a2(rough)) * max(dot(n, h), 0.0) / (4.0 * vh);
 }
 
-// échantillon du BSDF : direction, poids f·cos/pdf (parties diffuse + spéculaire), lobe tiré
+// BSDF sample: direction, weight f·cos/pdf (diffuse + specular parts), lobe drawn
 struct Bs { ok: bool, wi: vec3<f32>, w: vec3<f32>, spec: bool, lobe_rough: f32 };
 fn bsdf_sample(n: vec3<f32>, wo: vec3<f32>, base: vec3<f32>, rough: f32, metal: f32, diffuse_only: bool) -> Bs {
     var b: Bs;
@@ -565,7 +565,7 @@ fn bsdf_sample(n: vec3<f32>, wo: vec3<f32>, base: vec3<f32>, rough: f32, metal: 
     return b;
 }
 
-// échantillon du seul lobe spéculaire (reflets par pixel du mode jeu)
+// sample of the specular lobe only (per-pixel reflections in game mode)
 fn spec_sample(n: vec3<f32>, wo: vec3<f32>, base: vec3<f32>, rough: f32, metal: f32) -> Bs {
     var b: Bs;
     b.spec = true;
@@ -578,11 +578,11 @@ fn spec_sample(n: vec3<f32>, wo: vec3<f32>, base: vec3<f32>, rough: f32, metal: 
     return b;
 }
 
-// MIS (heuristique d'équilibre) au premier sommet du mode jeu, entre le tirage d'une lampe et le
-// tirage du BSDF : un miroir qui voit une lampe étendue (le ciel) ne l'atteint presque jamais par
-// le tirage de lampe (lobe minuscule), d'où des points blancs ; le rayon de reflet qui touche la
-// lampe porte alors l'essentiel. mis_mode 0 : pas de MIS ; 1 : lobe spéculaire seul (reflets par
-// pixel de KRC, seule la partie spéculaire est pondérée) ; 2 : BSDF complet (SHaRC Render).
+// MIS (balance heuristic) at the first vertex in game mode, between sampling a lamp and
+// sampling the BSDF: a mirror seeing an extended lamp (the sky) almost never reaches it through
+// lamp sampling (tiny lobe), hence white dots; the reflection ray hitting the
+// lamp then carries most of it. mis_mode 0: no MIS; 1: specular lobe only (KRC's per-pixel
+// reflections, only the specular part is weighted); 2: full BSDF (SHaRC Render).
 var<private> mis_mode: u32;
 
 fn mis_bsdf_pdf(n: vec3<f32>, wo: vec3<f32>, wi: vec3<f32>, base: vec3<f32>, rough: f32, metal: f32) -> f32 {
@@ -593,7 +593,7 @@ fn mis_bsdf_pdf(n: vec3<f32>, wo: vec3<f32>, wi: vec3<f32>, base: vec3<f32>, rou
     return (1.0 - ps) * nl / PI + ps * pdf_spec(n, wo, wi, rough);
 }
 
-// densité (angle solide) du tirage de lampe pour un rayon qui touche la lampe j à la distance t
+// density (solid angle) of lamp sampling for a ray hitting lamp j at distance t
 fn light_hit_pdf(j: u32, t: f32, wi: vec3<f32>) -> f32 {
     var total = 0.0;
     for (var i = 0u; i < n_lights(); i++) { total += light_power(i); }
@@ -602,7 +602,7 @@ fn light_hit_pdf(j: u32, t: f32, wi: vec3<f32>) -> f32 {
     return light_power(j) / total * t * t / (wi.y * 4.0 * li.hx * li.hz);
 }
 
-// lumière d'une lampe touchée par le rayon du BSDF au premier sommet, pondérée par le MIS
+// light of a lamp hit by the BSDF ray at the first vertex, weighted by MIS
 fn mis_light_hit(j: u32, t: f32, n: vec3<f32>, wo: vec3<f32>, wi: vec3<f32>, base: vec3<f32>, rough: f32, metal: f32) -> vec3<f32> {
     let li = light_at(j);
     if (li.on < 0.5 || wi.y <= 0.0) { return vec3<f32>(0.0); }
@@ -611,7 +611,7 @@ fn mis_light_hit(j: u32, t: f32, n: vec3<f32>, wo: vec3<f32>, wi: vec3<f32>, bas
     return li.emission * (pb / max(pb + pl, 1e-12));
 }
 
-// éclairage direct d'un sommet (une lampe tirée selon sa puissance), parties diffuse et spéculaire
+// direct lighting of a vertex (one lamp drawn according to its power), diffuse and specular parts
 fn nee_split(p: vec3<f32>, n: vec3<f32>, wo: vec3<f32>, base: vec3<f32>, rough: f32, metal: f32) -> Brdf2 {
     var r: Brdf2;
     r.d = vec3<f32>(0.0);
@@ -678,7 +678,7 @@ fn toggle_w(j: u32) -> f32 {
 
 struct LL { l: vec3<f32>, dl: vec3<f32> };
 
-// matériau et direction de sortie (vers la caméra) du premier sommet de radiance()
+// material and outgoing direction (toward the camera) of radiance()'s first vertex
 fn set_primary(g: Gpx, diffuse_only: bool) {
     pm_wo = normalize(fr.eye - g.p);
     pm_rough = g_rough(g);
@@ -688,7 +688,7 @@ fn set_primary(g: Gpx, diffuse_only: bool) {
 
 struct CacheHit { found: bool, mean: vec3<f32>, deps: vec2<u32> };
 
-// indice de la cellule existante au point (p, n) (jitter tiré au hasard), ou 0xffffffff
+// index of the existing cell at point (p, n) (jitter drawn at random), or 0xffffffff
 fn cell_at(p: vec3<f32>, n: vec3<f32>, dist: f32) -> u32 {
     let key = key_at(p, n, dist, vec2<f32>(rnd() - 0.5, rnd() - 0.5));
     var h = key & fr.table_mask;
@@ -701,7 +701,7 @@ fn cell_at(p: vec3<f32>, n: vec3<f32>, dist: f32) -> u32 {
     return 0xffffffffu;
 }
 
-// cellule existante au point (p, n), avec assez d'échantillons
+// existing cell at point (p, n), with enough samples
 fn cache_at(p: vec3<f32>, n: vec3<f32>, dist: f32, albedo: vec3<f32>) -> CacheHit {
     var r: CacheHit;
     r.found = false;
@@ -710,7 +710,7 @@ fn cache_at(p: vec3<f32>, n: vec3<f32>, dist: f32, albedo: vec3<f32>) -> CacheHi
         {
             let c = c1 + 1u;
             if (c == 0u) { return r; }
-            // champs lus un par un : la cellule entière (144 octets) coûte cher dans la boucle de traçage
+            // fields read one by one: the whole cell (144 bytes) is expensive in the tracing loop
             if (cells[c - 1u].n < RESAMPLE_N_MIN) { return r; }
             r.found = true;
             r.mean = cells[c - 1u].mean * demod(albedo);
@@ -823,7 +823,7 @@ fn radiance(p0: vec3<f32>, n0: vec3<f32>, a0: vec3<f32>) -> LL {
         rough = reg_rough(h.rough);
         metal = h.metal;
         wo = -d;
-        // réutilisation : la cellule visible du 1er rebond (assez loin pour ne pas être la sienne)
+        // reuse: the visible cell of the 1st bounce (far enough not to be its own)
         if (reuse && depth == 0u) {
             let dist = length(p - fr.eye);
             if (h.t > cell_size(dist) * 1.7320508) {
@@ -835,15 +835,15 @@ fn radiance(p0: vec3<f32>, n0: vec3<f32>, a0: vec3<f32>) -> LL {
                 }
             }
         }
-        // rééchantillonnage : au sommet rs_depth (1 ou 2), si une cellule existe assez loin (le
-        // segment dépasse la cellule, pour ne pas se relire soi-même), on prend sa moyenne ; la
-        // cellule lue transmet ses dépendances (la détection d'événements reste conservatrice)
+        // resampling: at vertex rs_depth (1 or 2), if a cell exists far enough (the
+        // segment goes beyond the cell, so as not to read itself back), its mean is taken; the
+        // cell read passes on its dependencies (event detection stays conservative)
         if (resample && depth + 1u >= rs_depth && sp_cell == 0xffffffffu) {
             let dist = length(p - fr.eye);
             if (h.t > cell_size(dist) * 1.7320508) {
                 let jit = vec2<f32>(rnd() - 0.5, rnd() - 0.5);
                 if ((fr.flags & F_SUPPORT) != 0u) {
-                    // cellule de support : trouvée et mûre → arrêt ; sinon créée ou nourrie
+                    // support cell: found and mature → stop; otherwise created or fed
                     let key = key_at(p, n, dist, jit);
                     let sc = insert_key(key);
                     if (sc != 0xffffffffu && atomicLoad(&vals[(cells[sc].slot - 1u) & fr.table_mask]) != 0u
@@ -870,8 +870,8 @@ fn radiance(p0: vec3<f32>, n0: vec3<f32>, a0: vec3<f32>) -> LL {
                 ch.found = false;
                 if ((fr.flags & F_SUPPORT) == 0u) { ch = cache_at(p, n, dist, diff_albedo(albedo, metal)); }
                 if (ch.found) {
-                    // arrêt sur le cache au 1er rebond : la suite n'est pas un échantillon neuf de la
-                    // cellule touchée (SHaRC ne compte pas non plus d'échantillon dans ce cas)
+                    // stopping on the cache at the 1st bounce: the rest is not a fresh sample of the
+                    // cell hit (SHaRC does not count a sample in that case either)
                     if (depth == 0u) { ru_cell = 0xffffffffu; }
                     rs_hit = true;
                     res.l += beta * ch.mean;
@@ -879,9 +879,9 @@ fn radiance(p0: vec3<f32>, n0: vec3<f32>, a0: vec3<f32>) -> LL {
                         m_trav = m_trav | ch.deps;
                         m_vsup = m_vsup | ch.deps;
                     }
-                    // cellules « indirect seulement » : il manque l'éclairage direct de ce sommet,
-                    // calculé au tour suivant avant l'arrêt ; sommet brillant : la cellule ne porte que
-                    // le diffus, il manque le spéculaire direct
+                    // "indirect only" cells: this vertex's direct lighting is missing,
+                    // computed on the next round before stopping; glossy vertex: the cell carries only
+                    // diffuse, the direct specular is missing
                     if ((fr.flags & F_INDIRECT) != 0u) {
                         rs_stop = true;
                     } else if (!is_diffuse(rough, metal)) {
@@ -904,13 +904,13 @@ fn radiance(p0: vec3<f32>, n0: vec3<f32>, a0: vec3<f32>) -> LL {
 
 fn lum(c: vec3<f32>) -> f32 { return 0.2126 * c.x + 0.7152 * c.y + 0.0722 * c.z; }
 
-// enregistre les dépendances d'un chemin dans la cellule
+// records a path's dependencies in the cell
 fn commit_deps(c: u32) {
     let b = c * ACC;
     if (m_trav.x != 0u) { atomicOr(&acc[b + A_DEPS], m_trav.x); }
     if (m_trav.y != 0u) { atomicOr(&acc[b + A_DEPS + 1u], m_trav.y); }
     atomicAdd(&acc[b + A_NS], 1u);
-    // seulement les bits allumés (≈ 2 par chemin)
+    // only the bits that are set (≈ 2 per path)
     for (var h = 0u; h < 2u; h++) {
         var m = m_vsup[h];
         while (m != 0u) {
@@ -921,9 +921,9 @@ fn commit_deps(c: u32) {
     }
 }
 
-// Entrelacement des tâches : les tâches d'une même cellule sont consécutives ; un warp qui les
-// traiterait ensemble se battrait sur les mêmes atomiques. Le thread g prend la tâche
-// (g mod 8)·S + g/8, avec S = ⌈N/8⌉.
+// Task interleaving: the tasks of one cell are consecutive; a warp processing them
+// together would fight over the same atomics. Thread g takes task
+// (g mod 8)·S + g/8, with S = ⌈N/8⌉.
 fn flat_id(gid: vec3<u32>, nwg: vec3<u32>) -> u32 {
     return gid.y * nwg.x * 64u + gid.x;
 }
@@ -993,8 +993,8 @@ fn find_cell(key: u32) -> u32 {
     return 0xffffffffu;
 }
 
-// insère une clé (ou la retrouve) ; renvoie l'indice de la cellule, ou 0xffffffff si la table
-// ou le tableau de cellules est plein
+// inserts a key (or finds it); returns the cell's index, or 0xffffffff if the table
+// or the cell array is full
 fn insert_key(key: u32) -> u32 {
     var h = key & fr.table_mask;
     for (var probe = 0u; probe < 64u; probe++) {
@@ -1025,8 +1025,8 @@ fn insert_key(key: u32) -> u32 {
     return 0xffffffffu;
 }
 
-// a priori d'une cellule neuve : la cellule du niveau plus grossier, sinon plus fin, au même
-// point (poids SEED_N au plus), avec ses dépendances
+// prior of a new cell: the cell of the coarser level, otherwise the finer one, at the same
+// point (weight SEED_N at most), with its dependencies
 fn seed_cell(c: u32, p: vec3<f32>, n: vec3<f32>, dist: f32, j: vec2<f32>) {
     for (var s = 0u; s < 2u; s++) {
         let pc = find_cell(key_at(p, n, select(dist * 2.0, dist * 0.5, s == 1u), j));
@@ -1049,7 +1049,7 @@ fn seed_cell(c: u32, p: vec3<f32>, n: vec3<f32>, dist: f32, j: vec2<f32>) {
 
 fn cell_size(dist: f32) -> f32 { return exp2(floor(log2(fr.cell_px * dist * fr.px_angle))); }
 
-// clé de la cellule d'un point quelconque (taille selon la distance à la caméra, jitter j)
+// key of the cell of any point (size depending on the distance to the camera, jitter j)
 fn key_at(p: vec3<f32>, n: vec3<f32>, dist: f32, j: vec2<f32>) -> u32 {
     let level = floor(log2(fr.cell_px * dist * fr.px_angle));
     let s = exp2(level);
@@ -1074,11 +1074,11 @@ fn key_at(p: vec3<f32>, n: vec3<f32>, dist: f32, j: vec2<f32>) -> u32 {
     return clamp(key, 1u, TOMB - 1u);
 }
 
-// cellule neuve : d'abord la liste libre (remplie par l'éviction, dans une autre passe), sinon
-// au bout du tableau
+// new cell: first the free list (filled by eviction, in another pass), otherwise
+// at the end of the array
 fn alloc_cell() -> u32 {
-    // C_FREE ne change pas pendant l'insertion (il n'est modifié que par l'éviction et par
-    // prep_cells) : un simple curseur suffit, sans boucle de CAS sur un compteur partagé
+    // C_FREE does not change during insertion (it is only modified by eviction and by
+    // prep_cells): a plain cursor is enough, without a CAS loop on a shared counter
     let n = atomicLoad(&ctr[C_FREE]);
     let i = atomicAdd(&ctr[C_POP], 1u);
     if (i < n) { return free_list[n - 1u - i]; }
@@ -1087,8 +1087,8 @@ fn alloc_cell() -> u32 {
     return c;
 }
 
-// éviction : pierre tombale dans la table (les sondes linéaires la traversent), cellule remise à
-// zéro et rendue à la liste libre
+// eviction: tombstone in the table (linear probes go through it), cell reset to
+// zero and given back to the free list
 fn evict(c: u32) {
     let h = cells[c].slot - 1u;
     atomicStore(&keys[h], TOMB);
@@ -1106,8 +1106,8 @@ fn evict(c: u32) {
     atomicAdd(&ctr[C_EVICT], 1u);
 }
 
-// reconstruction de la table quand les pierres tombales s'accumulent : 1) vider, 2) réinsérer
-// la clé de chaque cellule vivante
+// rebuild of the table when tombstones pile up: 1) clear, 2) reinsert
+// the key of each live cell
 @compute @workgroup_size(256)
 fn rebuild_clear(@builtin(global_invocation_id) gid: vec3<u32>) {
     let h = gid.x;
@@ -1136,7 +1136,7 @@ fn rebuild_insert(@builtin(global_invocation_id) gid: vec3<u32>) {
     atomicAdd(&ctr[C_OVERFLOW], 1u);
 }
 
-// 1er temps : réserver les clés nouvelles (sans attente active)
+// 1st step: reserve the new keys (without spin-waiting)
 @compute @workgroup_size(256)
 fn insert(@builtin(global_invocation_id) gid: vec3<u32>) {
     let k = gid.x / K;
@@ -1145,8 +1145,8 @@ fn insert(@builtin(global_invocation_id) gid: vec3<u32>) {
     let key = cell_key(k, slot);
     var h = key & fr.table_mask;
     for (var probe = 0u; probe < 64u; probe++) {
-        // lecture d'abord : la clé existe presque toujours, et un CAS sur chaque case sondée
-        // sérialise les milliers de fils qui partagent une cellule
+        // read first: the key almost always exists, and a CAS on every probed slot
+        // serialises the thousands of threads sharing a cell
         let kk = atomicLoad(&keys[h]);
         if (kk == key) { return; }
         if (kk != 0u) {
@@ -1171,13 +1171,13 @@ fn insert(@builtin(global_invocation_id) gid: vec3<u32>) {
             return;
         }
         if (r.old_value == key) { return; }
-        if (r.old_value == 0u) { probe--; continue; } // échec fallacieux de CAS faible
+        if (r.old_value == 0u) { probe--; continue; } // spurious failure of a weak CAS
         h = (h + 1u) & fr.table_mask;
     }
     atomicAdd(&ctr[C_OVERFLOW], 1u);
 }
 
-// 2e temps : retrouver la cellule, empreinte, pixel de référence tiré uniformément
+// 2nd step: find the cell again, footprint, reference pixel drawn uniformly
 @compute @workgroup_size(256)
 fn lookup(@builtin(global_invocation_id) gid: vec3<u32>) {
     let k = gid.x / K;
@@ -1247,7 +1247,7 @@ fn push_tasks(c: u32, m: u32, kind: u32) {
     }
 }
 
-// remise à zéro des compteurs de frame (le nombre de cellules et la dette persistent)
+// reset of the frame counters (the number of cells and the debt persist)
 @compute @workgroup_size(64)
 fn reset_ctr(@builtin(global_invocation_id) gid: vec3<u32>) {
     let i = gid.x;
@@ -1255,7 +1255,7 @@ fn reset_ctr(@builtin(global_invocation_id) gid: vec3<u32>) {
     atomicStore(&ctr[i], 0u);
 }
 
-// Amortissement : réserve m chemins corrélés sous le plafond de la frame.
+// Amortisation: reserves m correlated paths under the frame's cap.
 fn try_reserve(m: u32) -> bool {
     if ((fr.flags & F_AMORTIZE) == 0u) { return true; }
     let cap = u32(f32(atomicLoad(&ctr[C_SURF])) * fr.ppp * DELTA_CAP);
@@ -1267,7 +1267,7 @@ fn try_reserve(m: u32) -> bool {
     return true;
 }
 
-// lance les chemins corrélés d'une cellule suspecte visible, ou la met en attente
+// launches the correlated paths of a visible suspect cell, or puts it on hold
 fn start_delta(c: u32, m: u32) {
     let b = c * ACC;
     if (try_reserve(m)) {
@@ -1279,7 +1279,7 @@ fn start_delta(c: u32, m: u32) {
     }
 }
 
-// cellules en attente (événement de lampe amorti) : on retente sous le plafond de cette frame
+// cells on hold (amortised lamp event): retried under this frame's cap
 @compute @workgroup_size(64)
 fn pending_mark(@builtin(global_invocation_id) gid: vec3<u32>) {
     let c = gid.x;
@@ -1297,13 +1297,13 @@ fn pending_mark(@builtin(global_invocation_id) gid: vec3<u32>) {
 
 fn m_light() -> u32 { return select(M_DELTA, fr.m_light, fr.m_light > 0u); }
 
-// suspects : dépendances L2 ET (géométrie, ou effet énergétique attendu > 1 %)
+// suspects: L2 dependencies AND (geometry, or expected energy effect > 1 %)
 @compute @workgroup_size(64)
 fn event_mark(@builtin(global_invocation_id) gid: vec3<u32>) {
     let c = gid.x;
     if (c >= min(atomicLoad(&ctr[C_CELLS]), fr.cell_cap)) { return; }
     let b = c * ACC;
-    // une cellule encore en attente d'un événement précédent perd son historique
+    // a cell still waiting for a previous event loses its history
     if (atomicLoad(&acc[b + A_SUSP]) == 2u) {
         clear_cell(c);
         atomicStore(&acc[b + A_SUSP], 0u);
@@ -1325,7 +1325,7 @@ fn event_mark(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     atomicAdd(&ctr[C_SUSPECTS], 1u);
     if (atomicLoad(&acc[b + A_FOOT]) == 0u) {
-        clear_cell(c); // invisible : on ne peut pas le mesurer, ça ne coûte rien
+        clear_cell(c); // invisible: it cannot be measured, and that costs nothing
         atomicAdd(&ctr[C_HARD], 1u);
         return;
     }
@@ -1350,7 +1350,7 @@ fn prep_indirect(round: u32) {
         lo = atomicLoad(&ctr[C_REG0]);
     }
     let n = cur - lo;
-    // au-delà de 65 535 groupes par dimension : grille 2D (index reconstruit par flat_id)
+    // beyond 65,535 groups per dimension: 2D grid (index rebuilt by flat_id)
     let groups = (8u * ((n + 7u) / 8u) + 63u) / 64u;
     let gx = min(groups, 32768u);
     ind[round * 3u] = max(gx, 1u);
@@ -1358,7 +1358,7 @@ fn prep_indirect(round: u32) {
     ind[round * 3u + 2u] = 1u;
 }
 
-// passes « par cellule » : autant de groupes que de cellules réelles, pas que de capacité
+// "per cell" passes: as many groups as real cells, not as capacity
 @compute @workgroup_size(1)
 fn prep_cells() {
     ind[12] = (atomicLoad(&ctr[C_NVIS]) + 63u) / 64u;
@@ -1373,8 +1373,8 @@ fn prep_cells() {
     ind[11] = 1u;
 }
 
-// après le traçage : la liste à résoudre a pu grandir (cellules de support), et des cellules
-// ont pu être prises dans la liste libre
+// after tracing: the list to resolve may have grown (support cells), and cells
+// may have been taken from the free list
 @compute @workgroup_size(1)
 fn prep_vis2() {
     ind[12] = (atomicLoad(&ctr[C_NVIS]) + 63u) / 64u;
@@ -1390,7 +1390,7 @@ fn prep_d2() { prep_indirect(1u); }
 @compute @workgroup_size(1)
 fn prep_reg() { prep_indirect(2u); }
 
-// chemins corrélés : même graine dans la scène courante et la précédente
+// correlated paths: same seed in the current scene and the previous one
 @compute @workgroup_size(64)
 fn delta_trace1(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups) nwg: vec3<u32>) {
     delta_trace(flat_id(gid, nwg), 0u);
@@ -1484,7 +1484,7 @@ fn delta_trace(g: u32, round: u32) {
     atomicAdd(&ctr[C_DOLD], retraced);
 }
 
-// 2e tour (géométrie) : M_DELTA chemins pour les cellules dont un chemin était affecté
+// 2nd round (geometry): M_DELTA paths for cells one of whose paths was affected
 @compute @workgroup_size(64)
 fn delta_more(@builtin(global_invocation_id) gid: vec3<u32>) {
     let c = gid.x;
@@ -1494,7 +1494,7 @@ fn delta_more(@builtin(global_invocation_id) gid: vec3<u32>) {
     push_tasks(c, M_DELTA - M_DELTA0, 1u);
 }
 
-// variable de contrôle : μ = x̄ − β (ȳ − μ_cache)
+// control variate: μ = x̄ − β (ȳ − μ_cache)
 @compute @workgroup_size(64)
 fn delta_apply(@builtin(global_invocation_id) gid: vec3<u32>) {
     let c = gid.x;
@@ -1507,7 +1507,7 @@ fn delta_apply(@builtin(global_invocation_id) gid: vec3<u32>) {
     let xl = ld_f32(b + A_PXL) / m;
     let yl = ld_f32(b + A_PYL) / m;
     if (atomicLoad(&acc[b + A_PDIFF]) == 0u) {
-        // cellule inchangée : les nouveaux échantillons sont des échantillons ordinaires
+        // unchanged cell: the new samples are ordinary samples
         atomicAdd(&acc[b + A_FN], u32(m));
         add_fx(b + A_FR, xr.x * m);
         add_fx(b + A_FR + 1u, xr.y * m);
@@ -1515,9 +1515,9 @@ fn delta_apply(@builtin(global_invocation_id) gid: vec3<u32>) {
         add_fx(b + A_FL, xl * m);
         add_f32(b + A_FL2, ld_f32(b + A_PXL2));
         atomicAdd(&ctr[C_DZERO], 1u);
-        // Aucun des m chemins n'a vu la lampe : c'est exact pour ces chemins, pas pour l'espérance
-        // de la cellule (une petite lampe vive peut n'être vue que rarement). L'estimation est
-        // gardée, mais son poids plafonné, pour que l'échantillonnage ordinaire la remette à jour.
+        // None of the m paths saw the lamp: that is exact for those paths, not for the cell's
+        // expectation (a small bright lamp may be seen only rarely). The estimate is
+        // kept, but its weight capped, so that ordinary sampling brings it up to date.
         if ((fr.flags & (F_ZCAP | F_GEOMETRY)) == F_ZCAP) {
             let np = select(N_POST, fr.n_post, fr.n_post > 0.0);
             if (cells[c].n > np) {
@@ -1555,8 +1555,8 @@ fn delta_apply(@builtin(global_invocation_id) gid: vec3<u32>) {
     cell.mean = mu;
     cell.lmean = mu_l;
     cell.m2 = s2 * (n_eff - 1.0);
-    // changement énorme : l'historique ne sert plus, on repart des seuls nouveaux échantillons
-    // (la cellule redevient prioritaire pour l'allocation)
+    // huge change: the history is useless, restart from the new samples alone
+    // (the cell becomes a priority for allocation again)
     if (fr.reset_ratio > 0.0 && abs(mu_l - cell_old_l) > fr.reset_ratio * max(cell_old_l, 1e-6)) {
         cell.n = m;
         cell.mean = xr;
@@ -1580,7 +1580,7 @@ fn rel_var(c: u32) -> f32 {
 fn alloc_hist(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (gid.x >= atomicLoad(&ctr[C_NVIS])) { return; }
     let c = vis_list[gid.x];
-    // une cellule en attente ne reçoit pas d'échantillons ordinaires (historique périmé)
+    // a cell on hold receives no ordinary samples (stale history)
     let foot = select(atomicLoad(&acc[c * ACC + A_FOOT]), 0u, atomicLoad(&acc[c * ACC + A_SUSP]) == 2u);
     let u = f32(pcg(c ^ pcg(fr.frame * 7u + fr.seed)) >> 8u) * (1.0 / 16777216.0);
     qbuf[c] = vec4<f32>(f32(foot) / f32(K), cells[c].n, rel_var(c), u);
@@ -1600,23 +1600,23 @@ fn post_var(n: f32, rel: f32, prior: f32) -> f32 {
     return (KAPPA * prior + (n - 1.0) * rel) / (KAPPA + n - 1.0);
 }
 
-// nombre d'échantillons pour un seuil λ de gain marginal f·pv/((n+k)(n+k+1)) ≥ λ
+// number of samples for a threshold λ of marginal gain f·pv/((n+k)(n+k+1)) ≥ λ
 fn quota(c: u32, lambda: f32, prior: f32) -> u32 {
     let q = qbuf[c];
     let foot = q.x;
     if (foot == 0.0) { return 0u; }
     let n = q.y;
-    // Plafond : avec une radiance à queue lourde (petite lampe vive, indirect), une cellule qui vient
-    // de tirer une valeur rare verrait sa variance exploser et serait aussitôt sur-échantillonnée :
-    // la valeur rare serait diluée dans un n qui grandit parce qu'elle a été vue (biais vers le sombre).
+    // Cap: with heavy-tailed radiance (small bright lamp, indirect), a cell that has just
+    // drawn a rare value would see its variance explode and be immediately oversampled:
+    // the rare value would be diluted in an n that grows because it was seen (bias toward dark).
     var rel = q.z;
     if (fr.rel_cap > 0.0) { rel = min(rel, fr.rel_cap * prior); }
     let pv = post_var(n, rel, prior);
-    // qualité cible : une cellule dont l'erreur relative prédite de la moyenne est sous τ ne
-    // reçoit plus de chemins (seulement le plancher d'exploration)
+    // target quality: a cell whose predicted relative error of the mean is under τ no
+    // longer receives paths (only the exploration floor)
     if (fr.tau > 0.0 && n >= 1.0 && pv / n < fr.tau * fr.tau) { return 0u; }
     let t = (-1.0 + sqrt(1.0 + 4.0 * foot * pv / lambda)) * 0.5;
-    // arrondi stochastique (même tirage au balayage et à l'émission) : Σ quotas suit la solution continue
+    // stochastic rounding (same draw at the sweep and at emission): Σ quotas follows the continuous solution
     var k = max(floor(t - n + q.w), 0.0);
     if (n < 1.0) { k = max(k, 1.0); }
     return min(u32(k), MAX_PER_CELL);
@@ -1628,9 +1628,9 @@ fn explore(c: u32) -> u32 {
     return select(0u, 1u, fr.frame - cells[c].last >= EXPLORE_PERIOD);
 }
 
-// Allocation : seuil λ de gain marginal tel que Σ quota(λ) = budget. Trois balayages parallèles
-// de NCAND candidats log-espacés encadrent λ (précision ≈ 2^(70/31³) ≈ 0,2 %) : à l'état convergé,
-// toutes les cellules sont près de l'équilibre et Σ quota varie d'un facteur 2 pour 5 % sur λ.
+// Allocation: threshold λ of marginal gain such that Σ quota(λ) = budget. Three parallel sweeps
+// of NCAND log-spaced candidates bracket λ (precision ≈ 2^(70/31³) ≈ 0.2 %): in the converged state,
+// every cell is close to equilibrium and Σ quota varies by a factor 2 for 5 % on λ.
 const NCAND: u32 = 32u;
 var<workgroup> wsum: array<atomic<u32>, 32>;
 
@@ -1696,7 +1696,7 @@ fn alloc_scan(gid: vec3<u32>, lid: vec3<u32>, base: u32) {
     }
 }
 
-// garde le plus petit candidat dont la somme tient dans le budget, et resserre l'encadrement
+// keeps the smallest candidate whose sum fits in the budget, and tightens the bracket
 @compute @workgroup_size(1)
 fn alloc_pick1() { alloc_pick(C_SCAN); }
 @compute @workgroup_size(1)
@@ -1726,12 +1726,12 @@ fn alloc_emit(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (k > 0u) { push_tasks(c, k, 0u); }
 }
 
-// mode SHaRC : un chemin par pixel de surface, vers une de ses K cellules au hasard
+// SHaRC mode: one path per surface pixel, toward one of its K cells at random
 @compute @workgroup_size(64)
 fn sharc_emit(@builtin(global_invocation_id) gid: vec3<u32>) {
     let k = gid.x;
     if (k >= fr.w * fr.h || gbuf[k].kind != 2u) { return; }
-    // ppp chemins par pixel (arrondi stochastique), chacun vers une de ses K cellules au hasard
+    // ppp paths per pixel (stochastic rounding), each toward one of its K cells at random
     var h = pcg(k ^ pcg(fr.frame + fr.seed));
     let n = u32(floor(fr.ppp + f32(h >> 8u) * (1.0 / 16777216.0)));
     for (var j = 0u; j < n; j++) {
@@ -1773,12 +1773,12 @@ fn trace(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups)
     atomicAdd(&ctr[C_SEGS], n_segs);
     if (rs_hit) { atomicAdd(&ctr[C_RSHIT], 1u); }
     if (sp_cell != 0xffffffffu && all(sp_beta > vec3<f32>(0.0))) {
-        // échantillon de la cellule de support : radiance sortante au sommet (suite du chemin)
+        // sample of the support cell: outgoing radiance at the vertex (rest of the path)
         let u = (v_raw - sp_prefix) / sp_beta / demod(sp_albedo);
         let bs = sp_cell * ACC;
         if (rec_on) { commit_deps(sp_cell); }
         if (atomicAdd(&acc[bs + A_FN], 1u) == 0u && atomicLoad(&acc[bs + A_FOOT]) == 0u) {
-            vis_list[atomicAdd(&ctr[C_NVIS], 1u)] = sp_cell; // résolue avec les cellules visibles
+            vis_list[atomicAdd(&ctr[C_NVIS], 1u)] = sp_cell; // resolved with the visible cells
         }
         add_fx(bs + A_FR, u.x);
         add_fx(bs + A_FR + 1u, u.y);
@@ -1789,12 +1789,12 @@ fn trace(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups)
     }
     let gda = diff_albedo(gx.albedo, g_metal(gx));
     var v = (v_raw - select(vec3<f32>(0.0), d0_l, (fr.flags & F_INDIRECT) != 0u)) / demod(gda);
-    // mode jeu : écrêtage des lucioles (comme les caches des jeux) — un échantillon plus de
-    // FIREFLY_K fois plus lumineux que la moyenne de sa cellule est ramené à cette borne ; sinon
-    // il fait une tache de la taille de la cellule, que le débruiteur étale
+    // game mode: firefly clamping (like games' caches) — a sample more than
+    // FIREFLY_K times brighter than its cell's mean is brought back to that bound; otherwise
+    // it makes a blotch the size of the cell, which the denoiser spreads
     var vscale = 1.0;
     if ((fr.flags & F_GAME) != 0u && (fr.off & 4u) == 0u && cells[c].n >= 8.0) {
-        // jeune cellule (après un événement, une valeur rare pèse lourd) : borne plus stricte
+        // young cell (after an event, a rare value weighs a lot): stricter bound
         let kf = select(FIREFLY_K, FIREFLY_K_YOUNG, cells[c].n < 64.0);
         let cap = kf * max(cells[c].lmean, 1e-4);
         let lv = lum(v);
@@ -1810,7 +1810,7 @@ fn trace(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups)
     let b = c * ACC;
     if (rec_on) { commit_deps(c); }
     if (ru_cell != 0xffffffffu && all(ru_beta > vec3<f32>(0.0))) {
-        // radiance sortante au 1er rebond : la suite du chemin, divisée par le débit à l'arrivée
+        // outgoing radiance at the 1st bounce: the rest of the path, divided by the throughput on arrival
         let u = (v_raw - ru_prefix) / ru_beta;
         let b1 = ru_cell * ACC;
         atomicAdd(&acc[b1 + A_FN], 1u);
@@ -1829,7 +1829,7 @@ fn trace(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups)
     add_fx(b + A_FL, l);
     add_f32(b + A_FL2, l * l);
     if ((fr.flags & F_MULTI) != 0u) {
-        // même échantillon pour une cellule de l'autre niveau du pixel de départ
+        // same sample for a cell of the other level of the starting pixel
         var lvl = 2u;
         for (var s = 0u; s < K; s++) {
             if (pix_cells[t.y * K + s] == c) { lvl = select(0u, 1u, s >= K / 2u); }
@@ -1851,7 +1851,7 @@ fn trace(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups)
     }
 }
 
-// fusion des échantillons de la frame, filet de sécurité, vieillissement, remise à zéro
+// merge of the frame's samples, safety net, ageing, reset
 @compute @workgroup_size(64)
 fn resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (gid.x >= atomicLoad(&ctr[C_NVIS])) { return; }
@@ -1879,13 +1879,13 @@ fn resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
             cell.m2 += fm2 + dl * dl * cell.n * fn_ / n;
             cell.lmean += dl * (fn_ / n);
             cell.n = n;
-            // historique plafonné : au-delà, moyenne glissante (les petites erreurs résiduelles des
-            // corrections ne s'accumulent pas indéfiniment)
+            // capped history: beyond it, running average (the small residual errors of the
+            // corrections do not accumulate forever)
             if (cell.n > N_MAX) {
                 cell.m2 *= (N_MAX - 1.0) / (cell.n - 1.0);
                 cell.n = N_MAX;
             }
-            // fenêtre récente du filet de sécurité
+            // recent window of the safety net
             let rn = cell.rn + fn_;
             let rdl = fl - cell.rl;
             cell.rm2 += fm2 + rdl * rdl * cell.rn * fn_ / rn;
@@ -1896,7 +1896,7 @@ fn resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
                     let v = max(max(cell.m2 / (cell.n - 1.0), cell.rm2 / (cell.rn - 1.0)), 1e-8);
                     let z = abs(cell.rl - cell.lmean) / sqrt(v / cell.rn + v / cell.n);
                     if (z > Z_SAFETY) {
-                        // la fenêtre récente ne garde que la luminance : la couleur est remise à l'échelle
+                        // the recent window keeps only luminance: the colour is rescaled
                         cell.mean = cell.mean * (cell.rl / max(cell.lmean, 1e-12));
                         cell.n = cell.rn;
                         cell.lmean = cell.rl;
@@ -1915,7 +1915,7 @@ fn resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (susp == 1u) { cell.last = fr.frame; }
     let foot = atomicLoad(&acc[b + A_FOOT]);
     if (foot > 0u || fn_ > 0.0) { cell.seen = fr.clock; }
-    // vieillissement des dépendances (fenêtres alternées de DEP_WINDOW échantillons)
+    // ageing of dependencies (alternating windows of DEP_WINDOW samples)
     let ns = atomicLoad(&acc[b + A_NS]);
     if (ns >= DEP_WINDOW) {
         cell.deps_prev = vec2<u32>(atomicLoad(&acc[b + A_DEPS]), atomicLoad(&acc[b + A_DEPS + 1u]));
@@ -1930,7 +1930,7 @@ fn resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     cells[c] = cell;
     atomicMax(&ctr[C_MAXN], bitcast<u32>(cell.n));
-    // remise à zéro des accumulateurs de frame
+    // reset of the frame accumulators
     atomicStore(&acc[b + A_FOOT], 0u);
     atomicStore(&acc[b + A_REF], 0u);
     atomicStore(&acc[b + A_FN], 0u);
@@ -1940,7 +1940,7 @@ fn resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (susp == 1u) { atomicStore(&acc[b + A_SUSP], 0u); } // 2 (en attente) persiste
 }
 
-// éviction : un huitième des cellules par frame (avant la résolution, qui remet l'empreinte à 0)
+// eviction: an eighth of the cells per frame (before the resolve, which resets the footprint to 0)
 @compute @workgroup_size(64)
 fn evict_sweep(@builtin(global_invocation_id) gid: vec3<u32>) {
     let c = gid.x * 8u + (fr.clock & 7u);
@@ -1963,7 +1963,7 @@ fn display(@builtin(global_invocation_id) gid: vec3<u32>) {
     } else if (g.kind == 2u) {
         var w = 0.0;
         if ((fr.flags & F_MULTI) != 0u) {
-            // niveaux fin et grossier : moyenne de chacun, puis passage progressif au fin
+            // fine and coarse levels: mean of each, then a gradual move to the fine one
             var vf = vec3<f32>(0.0);
             var vc = vec3<f32>(0.0);
             var wf = 0.0;
@@ -2006,8 +2006,8 @@ fn display(@builtin(global_invocation_id) gid: vec3<u32>) {
     image[k] = vec4<f32>(v, f32(g.kind));
 }
 
-// sondes de lampe : rayons fournis par le CPU (probe[2i] = origine, probe[2i+1] = direction),
-// premier impact écrit en retour (position, trouvé ; albédo). fr.round : scène 0 courante, 1 précédente.
+// lamp probes: rays provided by the CPU (probe[2i] = origin, probe[2i+1] = direction),
+// first hit written back (position, found; albedo). fr.round: scene 0 current, 1 previous.
 @group(0) @binding(21) var<storage, read_write> probe: array<vec4<f32>>;
 
 @compute @workgroup_size(64)
@@ -2022,7 +2022,7 @@ fn probe_trace(@builtin(global_invocation_id) gid: vec3<u32>) {
     probe[2u * i + 1u] = vec4<f32>(h.albedo, 0.0);
 }
 
-// image de référence : fr.pad0 chemins par pixel ajoutés à image (graines selon fr.frame)
+// reference image: fr.pad0 paths per pixel added to image (seeds according to fr.frame)
 @compute @workgroup_size(64)
 fn reference_acc(@builtin(global_invocation_id) gid: vec3<u32>) {
     let k = gid.x;

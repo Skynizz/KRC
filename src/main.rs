@@ -35,7 +35,7 @@ fn ensure_refs(world: &World, dir: &str, tracer: &tracer::Tracer) -> HashMap<Str
             let img = reference(&scene, &gbuffer(&scene, world), tracer);
             save_raw(&path, &img);
             image::save(&format!("{dir}/{id}.png"), world.w, world.h, &img);
-            eprintln!("référence {dir}/{id} : {:.1} s", t.elapsed().as_secs_f64());
+            eprintln!("reference {dir}/{id}: {:.1} s", t.elapsed().as_secs_f64());
             img
         });
         refs.insert(id, img);
@@ -43,14 +43,14 @@ fn ensure_refs(world: &World, dir: &str, tracer: &tracer::Tracer) -> HashMap<Str
     refs
 }
 
-/// Phases de la séquence : (nom, première frame, dernière frame exclue).
+/// Phases of the sequence: (name, first frame, last frame excluded).
 const PHASES: [(&str, usize, usize); 6] = [
-    ("tout", 0, 120),
-    ("statique", 30, 40),
-    ("boite", 40, 64),
-    ("apres_boite", 64, 80),
-    ("lampe_on", 80, 100),
-    ("lampe_off", 100, 120),
+    ("all", 0, 120),
+    ("static", 30, 40),
+    ("box", 40, 64),
+    ("after_box", 64, 80),
+    ("lamp_on", 80, 100),
+    ("lamp_off", 100, 120),
 ];
 
 fn mean_std(v: &[f64]) -> (f64, f64) {
@@ -111,7 +111,7 @@ fn run(
     summary
 }
 
-/// Passage à l'échelle : N pièces, mêmes événements (pièces 0 et 1), densité de pixels constante.
+/// Scaling: N rooms, same events (rooms 0 and 1), constant pixel density.
 fn scale(tracer: &tracer::Tracer) {
     let only: Option<Vec<String>> = std::env::var("KRC_METHODS").ok().map(|v| v.split(',').map(String::from).collect());
     let names: Vec<String> = [
@@ -142,7 +142,7 @@ fn scale(tracer: &tracer::Tracer) {
     for rooms in rooms_list {
         let world = World::new(rooms);
         let refs = ensure_refs(&world, &format!("results/ref_n{rooms}"), tracer);
-        eprintln!("--- {rooms} pièces");
+        eprintln!("--- {rooms} rooms");
         let summary = run(&names, seeds(), &refs, &world, &format!("{}/scale/n{rooms}", out_root(tracer)), warmup(), tracer);
         for line in summary.lines().skip(1) {
             all += &format!("{rooms},{line}\n");
@@ -153,18 +153,18 @@ fn scale(tracer: &tracer::Tracer) {
     }
 }
 
-/// Nombre de graines indépendantes par méthode (variable d'environnement KRC_SEEDS, 5 par défaut).
+/// Number of independent seeds per method (KRC_SEEDS environment variable, 5 by default).
 fn seeds() -> u64 {
     std::env::var("KRC_SEEDS").ok().and_then(|v| v.parse().ok()).unwrap_or(5)
 }
 
-/// Frames de préchauffage avant la séquence de passage à l'échelle (KRC_WARMUP, 150 par défaut) :
-/// les coûts mesurés sont alors ceux des événements, pas de la convergence initiale.
+/// Warm-up frames before the scaling sequence (KRC_WARMUP, 150 by default):
+/// the measured costs are then those of the events, not of the initial convergence.
 fn warmup() -> u32 {
     std::env::var("KRC_WARMUP").ok().and_then(|v| v.parse().ok()).unwrap_or(150)
 }
 
-/// Dossier des résultats : `results` (CPU), `results/gpu` (GPU), ou KRC_OUT.
+/// Results folder: `results` (CPU), `results/gpu` (GPU), or KRC_OUT.
 fn out_root(tracer: &tracer::Tracer) -> String {
     std::env::var("KRC_OUT").unwrap_or_else(|_| if tracer.is_gpu() { "results/gpu".into() } else { "results".into() })
 }
@@ -190,35 +190,35 @@ fn main() {
                 let cycles = args.get(1).and_then(|c| c.parse().ok()).unwrap_or(100);
                 gpu_krc::drift(&g, cycles, &ensure_refs(&w2, "results/ref", &tracer));
             }
-            None => eprintln!("pas de GPU"),
+            None => eprintln!("no GPU"),
         },
         Some("cornellcam") => match gpu::Gpu::new() {
             Some(g) => {
                 let size = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(256);
                 rt::run_tri(&g, seeds(), &rt::cornell_cam_setup(size));
             }
-            None => eprintln!("pas de GPU"),
+            None => eprintln!("no GPU"),
         },
         Some("sponzacam") => match gpu::Gpu::new() {
             Some(g) => {
                 let w: usize = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(480);
                 rt::run_tri(&g, seeds(), &rt::sponza_cam_setup(w, w * 9 / 16));
             }
-            None => eprintln!("pas de GPU"),
+            None => eprintln!("no GPU"),
         },
         Some("cornell") => match gpu::Gpu::new() {
             Some(g) => {
                 let size = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(256);
                 rt::run_tri(&g, seeds(), &rt::cornell_setup(size));
             }
-            None => eprintln!("pas de GPU"),
+            None => eprintln!("no GPU"),
         },
         Some("sponza") => match gpu::Gpu::new() {
             Some(g) => {
                 let w: usize = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(480);
                 rt::run_tri(&g, seeds(), &rt::sponza_setup(w, w * 9 / 16));
             }
-            None => eprintln!("pas de GPU"),
+            None => eprintln!("no GPU"),
         },
         Some("pareto") => match gpu::Gpu::new() {
             Some(g) => match args.get(1).map(String::as_str) {
@@ -235,14 +235,14 @@ fn main() {
                 }
                 _ => rt::pareto(&g, &rt::cornell_setup(args.get(1).and_then(|s| s.parse().ok()).unwrap_or(1024))),
             },
-            None => eprintln!("pas de GPU"),
+            None => eprintln!("no GPU"),
         },
         Some("spikes") => match gpu::Gpu::new() {
             Some(g) => match args.get(1).map(String::as_str) {
                 Some("sponza") => rt::spikes(&g, &rt::sponza_setup(1280, 720)),
                 _ => rt::spikes(&g, &rt::cornell_setup(args.get(1).and_then(|s| s.parse().ok()).unwrap_or(1024))),
             },
-            None => eprintln!("pas de GPU"),
+            None => eprintln!("no GPU"),
         },
         Some("bias") => match gpu::Gpu::new() {
             Some(g) => match args.get(1).map(String::as_str) {
@@ -251,9 +251,9 @@ fn main() {
                 Some("sponzacam") => rt::bias(&g, &rt::sponza_cam_setup(480, 270)),
                 _ => rt::bias(&g, &rt::sponza_setup(480, 270)),
             },
-            None => eprintln!("pas de GPU"),
+            None => eprintln!("no GPU"),
         },
-        Some("jeu") => match gpu::Gpu::new() {
+        Some("game") => match gpu::Gpu::new() {
             Some(g) => {
                 let setup = match args.get(1).map(String::as_str) {
                     Some("sponza") => rt::sponza_setup(480, 270),
@@ -269,9 +269,9 @@ fn main() {
                     .collect();
                 rt::game_eval(&g, &setup, &cfgs);
             }
-            None => eprintln!("pas de GPU"),
+            None => eprintln!("no GPU"),
         },
-        Some("duel") | Some("statique") => match gpu::Gpu::new() {
+        Some("duel") | Some("static") => match gpu::Gpu::new() {
             Some(g) => {
                 let setup = match args.get(1).map(String::as_str) {
                     Some("sponza") => rt::sponza_setup(480, 270),
@@ -288,7 +288,7 @@ fn main() {
                     rt::static_conv(&g, &setup, &cfgs);
                 }
             }
-            None => eprintln!("pas de GPU"),
+            None => eprintln!("no GPU"),
         },
         Some("passes") => match gpu::Gpu::new() {
             Some(g) => {
@@ -297,69 +297,69 @@ fn main() {
                     Some("sponza") => rt::sponza_setup(1280, 720),
                     Some("cornellcam") => rt::cornell_cam_setup(1024),
                     Some("sponzacam480") => rt::sponza_cam_setup(480, 270),
-                    Some("vitrine") => rt::vitrine_setup(960, 540),
+                    Some("showcase") => rt::showcase_setup(960, 540),
                     _ => rt::sponza_cam_setup(1280, 720),
                 };
                 rt::passes(&g, &setup, ppp);
             }
-            None => eprintln!("pas de GPU"),
+            None => eprintln!("no GPU"),
         },
-        Some("vitrine") => match gpu::Gpu::new() {
-            Some(g) => rt::vitrine_video(&g, args.get(1).and_then(|s| s.parse().ok()).unwrap_or(960)),
-            None => eprintln!("pas de GPU"),
+        Some("showcase") => match gpu::Gpu::new() {
+            Some(g) => rt::showcase_video(&g, args.get(1).and_then(|s| s.parse().ok()).unwrap_or(960)),
+            None => eprintln!("no GPU"),
         },
-        Some("vitrineref") => match gpu::Gpu::new() {
-            Some(g) => rt::vitrine_ref(
+        Some("showcaseref") => match gpu::Gpu::new() {
+            Some(g) => rt::showcase_ref(
                 &g,
                 args.get(1).and_then(|s| s.parse().ok()).unwrap_or(60),
                 args.get(2).and_then(|s| s.parse().ok()).unwrap_or(64),
             ),
-            None => eprintln!("pas de GPU"),
+            None => eprintln!("no GPU"),
         },
-        Some("vitrinedbg") => match gpu::Gpu::new() {
-            Some(g) => rt::vitrine_dbg(&g, args.get(1).and_then(|s| s.parse().ok()).unwrap_or(39)),
-            None => eprintln!("pas de GPU"),
+        Some("showcasedbg") => match gpu::Gpu::new() {
+            Some(g) => rt::showcase_dbg(&g, args.get(1).and_then(|s| s.parse().ok()).unwrap_or(39)),
+            None => eprintln!("no GPU"),
         },
-        Some("vitrinelum") => match gpu::Gpu::new() {
-            Some(g) => rt::vitrine_lum(&g),
-            None => eprintln!("pas de GPU"),
+        Some("showcaselum") => match gpu::Gpu::new() {
+            Some(g) => rt::showcase_lum(&g),
+            None => eprintln!("no GPU"),
         },
-        Some("vitrineregref") => match gpu::Gpu::new() {
-            Some(g) => rt::vitrine_regref(&g, args.get(1).and_then(|s| s.parse().ok()).unwrap_or(39)),
-            None => eprintln!("pas de GPU"),
+        Some("showcaseregref") => match gpu::Gpu::new() {
+            Some(g) => rt::showcase_regref(&g, args.get(1).and_then(|s| s.parse().ok()).unwrap_or(39)),
+            None => eprintln!("no GPU"),
         },
-        Some("vitrinems") => match gpu::Gpu::new() {
-            Some(g) => rt::vitrine_ms(&g, args.get(1).and_then(|s| s.parse().ok()).unwrap_or(960)),
-            None => eprintln!("pas de GPU"),
+        Some("showcasems") => match gpu::Gpu::new() {
+            Some(g) => rt::showcase_ms(&g, args.get(1).and_then(|s| s.parse().ok()).unwrap_or(960)),
+            None => eprintln!("no GPU"),
         },
-        Some("vitrinetest") => match gpu::Gpu::new() {
-            Some(g) => rt::vitrine_test(&g, args.get(1).and_then(|s| s.parse().ok()).unwrap_or(960)),
-            None => eprintln!("pas de GPU"),
+        Some("showcasetest") => match gpu::Gpu::new() {
+            Some(g) => rt::showcase_test(&g, args.get(1).and_then(|s| s.parse().ok()).unwrap_or(960)),
+            None => eprintln!("no GPU"),
         },
         Some("sharccheck") => match gpu::Gpu::new() {
             Some(g) => match args.get(1).map(String::as_str) {
                 Some("sponza") => rt::sharc_check(&g, &rt::sponza_setup(480, 270)),
                 _ => rt::sharc_check(&g, &rt::cornell_setup(256)),
             },
-            None => eprintln!("pas de GPU"),
+            None => eprintln!("no GPU"),
         },
         Some("sponzadebug") => match gpu::Gpu::new() {
             Some(g) => rt::sponza_debug(&g),
-            None => eprintln!("pas de GPU"),
+            None => eprintln!("no GPU"),
         },
         Some("rtsmoke") => match gpu::Gpu::new() {
             Some(g) => rt::smoke(&g),
-            None => eprintln!("pas de GPU"),
+            None => eprintln!("no GPU"),
         },
         Some("gpubench") => match gpu::Gpu::new() {
             Some(g) => gpu_krc::bench(&g),
-            None => eprintln!("pas de GPU"),
+            None => eprintln!("no GPU"),
         },
-        _ => eprintln!("usage : krc refs | run [méthodes...] | all | scale | bench"),
+        _ => eprintln!("usage: krc refs | run [methods...] | all | scale | bench"),
     }
 }
 
-/// Configurations du duel KRC / SHaRC (filtrées par KRC_DUEL, préfixes séparés par des virgules).
+/// Configurations of the KRC / SHaRC duel (filtered by KRC_DUEL, comma-separated prefixes).
 fn duel_cfgs() -> Vec<rt::DuelCfg> {
     use gpu_krc::{Method, ShParams};
     let d = ShParams::default();
@@ -432,7 +432,7 @@ fn duel_cfgs() -> Vec<rt::DuelCfg> {
         nv("sharc_nv 1px/1x1", 1),
     ];
     let mut v = all.to_vec();
-    // SHaRC réglé pour la réactivité (fenêtre d'accumulation courte, réglage exposé par l'exemple)
+    // SHaRC tuned for responsiveness (short accumulation window, a setting the sample exposes)
     for (name, down, acc) in [("sharc_nv acc5 1px/1x1", 1u32, 5u32), ("sharc_nv acc5 1px/2x2", 2, 5), ("sharc_nv acc10 1px/1x1", 1, 10)] {
         v.push(rt::DuelCfg {
             name,
@@ -504,7 +504,7 @@ fn duel_cfgs() -> Vec<rt::DuelCfg> {
             drs: false,
         });
     }
-    for (name, tau) in [("krc+cible 3% cell4", 0.03f32), ("krc+cible 5% cell4", 0.05), ("krc+cible 8% cell4", 0.08)] {
+    for (name, tau) in [("krc+target 3% cell4", 0.03f32), ("krc+target 5% cell4", 0.05), ("krc+target 8% cell4", 0.08)] {
         v.push(rt::DuelCfg {
             name,
             method: Method::Krc,
@@ -562,8 +562,8 @@ fn duel_cfgs() -> Vec<rt::DuelCfg> {
     v
 }
 
-/// Configurations du pipeline de jeu : KRC v2 (direct par pixel + indirect des cellules) et
-/// SHaRC officiel (passe Render), avec débruiteur ; deux variantes brutes pour référence.
+/// Configurations of the game pipeline: KRC v2 (per-pixel direct + indirect from the cells) and
+/// official SHaRC (Render pass), with a denoiser; two raw variants for reference.
 fn game_cfgs() -> Vec<(rt::DuelCfg, bool)> {
     use gpu_krc::{Method, ShParams};
     let d = ShParams::default();
@@ -600,8 +600,8 @@ fn game_cfgs() -> Vec<(rt::DuelCfg, bool)> {
     };
     let shg = |name, dn_gamma| rt::DuelCfg { name, dn_gamma, ..sh("", 1, 20) };
     vec![
-        // correctifs (KRC 0,5 chemin/px), un à la fois puis ensemble
-        // campagne finale : KRC jeu (32 chemins corrélés de lampe), SHaRC, bornage 1,5 et 3
+        // fixes (KRC 0.5 path/px), one at a time then together
+        // final campaign: KRC game (32 lamp correlated paths), SHaRC, clamp 1.5 and 3
         (rt::DuelCfg { drs: true, ..fix("drs krc 0.5 m32", 8.0, 32, -1.0, 0.0, 0.0) }, true),
         (rt::DuelCfg { drs: true, ..fix("drs krc 0.5 m8", 8.0, 0, -1.0, 0.0, 0.0) }, true),
         (fix("final krc 0.5 g3", 8.0, 32, -1.0, 0.0, 3.0), true),

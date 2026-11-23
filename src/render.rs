@@ -1,4 +1,4 @@
-//! Caméra, G-buffer, références et métriques.
+//! Camera, G-buffer, references and metrics.
 use crate::math::{mix64, v3, V3};
 use crate::par::par_map;
 use crate::tracer::{Opts, Req, Tracer};
@@ -7,8 +7,8 @@ use crate::scene::Scene;
 pub const REF_SPP: usize = 4096;
 const HFOV_DEG: f64 = 80.0;
 
-/// Taille de la scène (nombre de pièces) et caméra associée : 96 px de large par pièce,
-/// pour garder une densité de pixels constante quand la scène grandit.
+/// Scene size (number of rooms) and matching camera: 96 px wide per room,
+/// to keep a constant pixel density as the scene grows.
 #[derive(Clone, Copy)]
 pub struct World {
     pub rooms: usize,
@@ -20,7 +20,7 @@ impl World {
     pub fn new(rooms: usize) -> World {
         World::scaled(rooms, 1)
     }
-    /// Même cadrage, résolution multipliée par `s` (s = 10 et 2 pièces : 1920×960).
+    /// Same framing, resolution multiplied by `s` (s = 10 and 2 rooms: 1920×960).
     pub fn scaled(rooms: usize, s: usize) -> World {
         World { rooms, w: 96 * rooms * s, h: 96 * s }
     }
@@ -35,7 +35,7 @@ impl World {
     pub fn px_angle(&self) -> f64 {
         2.0 * (HFOV_DEG.to_radians() * 0.5).tan() / self.w as f64
     }
-    /// (œil, avant, droite, haut, tan demi-angle horizontal, vertical)
+    /// (eye, forward, right, up, tan of the horizontal half-angle, vertical)
     pub fn camera(&self) -> (V3, V3, V3, V3, f64, f64) {
         let (eye, look) = self.eye_look();
         let f = (look - eye).norm();
@@ -79,7 +79,7 @@ pub fn gbuffer(scene: &Scene, world: &World) -> Vec<Px> {
     })
 }
 
-/// Image de référence : moyenne de REF_SPP chemins par pixel au point visible.
+/// Reference image: mean of REF_SPP paths per pixel at the visible point.
 pub fn reference(scene: &Scene, gb: &[Px], tracer: &Tracer) -> Vec<V3> {
     let surf: Vec<usize> = (0..gb.len()).filter(|&k| matches!(gb[k], Px::Surf { .. })).collect();
     let reqs: Vec<Req> = surf
@@ -97,7 +97,7 @@ pub fn reference(scene: &Scene, gb: &[Px], tracer: &Tracer) -> Vec<V3> {
     img
 }
 
-/// (RMSE, relMSE) sur les pixels de surface.
+/// (RMSE, relMSE) over surface pixels.
 pub fn errors(img: &[V3], reference: &[V3], gb: &[Px]) -> (f64, f64) {
     let (mut se, mut rel, mut cnt) = (0.0, 0.0, 0.0);
     for k in 0..img.len() {
@@ -120,7 +120,7 @@ pub fn save_raw(path: &str, img: &[V3]) {
             b.extend_from_slice(&(c as f32).to_le_bytes());
         }
     }
-    std::fs::write(path, b).expect("écriture référence");
+    std::fs::write(path, b).expect("reference write");
 }
 
 pub fn load_raw(path: &str, len: usize) -> Option<Vec<V3>> {

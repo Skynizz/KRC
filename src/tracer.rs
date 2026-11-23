@@ -1,11 +1,11 @@
-//! Interface unique de tracé de chemins, sur CPU (pt.rs) ou GPU (trace.wgsl).
+//! Single path-tracing interface, on the CPU (pt.rs) or the GPU (trace.wgsl).
 use crate::gpu::Gpu;
 use crate::math::{Rng, V3};
 use crate::par::par_map;
 use crate::pt::{radiance_split, DepRec, NoRec};
 use crate::scene::Scene;
 
-/// Un point de surface à estimer, avec sa graine.
+/// A surface point to estimate, with its seed.
 #[derive(Clone, Copy)]
 pub struct Req {
     pub p: V3,
@@ -15,13 +15,13 @@ pub struct Req {
 }
 
 pub struct Opts<'a> {
-    /// pmf de lampes indépendante de leur état (chemins corrélés)
+    /// lamp pmf independent of their state (correlated paths)
     pub union: bool,
-    /// enregistrer les dépendances du chemin
+    /// record the path's dependencies
     pub record: bool,
-    /// poids allumée_avant − allumée_après par lampe (vide : aucun)
+    /// weight on_before − on_after per lamp (empty: none)
     pub toggle_w: &'a [f64],
-    /// chemins moyennés par requête
+    /// paths averaged per request
     pub spp: u32,
 }
 
@@ -31,9 +31,9 @@ impl Opts<'_> {
     }
 }
 
-/// Résultats d'un lot : radiance, ΔL (lampes changées), et dépendances si `record`.
-/// Les dépendances sont à part : un DepRec pèse ~450 octets, les fabriquer pour rien coûtait
-/// plus cher que le tracé GPU lui-même.
+/// Results of a batch: radiance, ΔL (changed lamps), and dependencies if `record`.
+/// Dependencies are separate: a DepRec weighs ~450 bytes, and building them for nothing cost
+/// more than the GPU trace itself.
 #[derive(Default)]
 pub struct Traced {
     pub l: Vec<V3>,
@@ -47,7 +47,7 @@ pub enum Tracer {
 }
 
 impl Tracer {
-    /// GPU si KRC_GPU est défini (et qu'un adaptateur est disponible), sinon CPU.
+    /// GPU if KRC_GPU is set (and an adapter is available), otherwise CPU.
     pub fn from_env() -> Tracer {
         if std::env::var("KRC_GPU").is_ok() {
             match Gpu::new() {
@@ -55,7 +55,7 @@ impl Tracer {
                     eprintln!("traceur GPU : {}", g.name);
                     return Tracer::Gpu(g);
                 }
-                None => eprintln!("pas d'adaptateur GPU utilisable, repli sur le CPU"),
+                None => eprintln!("no usable GPU adapter, falling back to the CPU"),
             }
         }
         Tracer::Cpu

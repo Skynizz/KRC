@@ -1,4 +1,4 @@
-//! Les méthodes comparées et la boucle de séquence.
+//! The compared methods and the sequence loop.
 use crate::cache::{cell_key, zscore, Cache, Cell, Stat};
 use crate::deps::{mark_aabb, region_of, Bits};
 use crate::math::{mix64, v3, Rng, V3};
@@ -9,50 +9,50 @@ use crate::render::{errors, gbuffer, Px, World};
 use crate::scene::{build, cosine_dir, moving_box_aabb, state_at, Scene, State, FRAMES, LIGHT_ID_BASE, MOVING_BOX};
 use std::collections::{BinaryHeap, HashMap};
 
-pub const K: usize = 4; // clés jitterées par pixel
-const N_CAP: f64 = 64.0; // z-test : poids max de l'historique d'une cellule suspecte
-const N_VERIFY: f64 = 8.0; // z-test : échantillons frais avant de confirmer
+pub const K: usize = 4; // jittered keys per pixel
+const N_CAP: f64 = 64.0; // z-test: max weight of a suspect cell's history
+const N_VERIFY: f64 = 8.0; // z-test: fresh samples before confirming
 const Z_VERIFY: f64 = 3.0;
-const M_DELTA0: usize = 2; // chemins corrélés par cellule suspecte, 1er tour
-const M_DELTA: usize = 8; // total si l'un des chemins du 1er tour est affecté
-const EPS_ENERGY: f64 = 0.01; // changement relatif attendu minimal pour suspecter une cellule
-const DEP_WINDOW: u32 = 64; // vieillissement des dépendances, en échantillons
-const DEBT_RATE: f64 = 0.5; // part max du budget d'une frame servant à rembourser les chemins différentiels
+const M_DELTA0: usize = 2; // correlated paths per suspect cell, 1st round
+const M_DELTA: usize = 8; // total if one of the 1st round's paths is affected
+const EPS_ENERGY: f64 = 0.01; // minimum expected relative change to suspect a cell
+const DEP_WINDOW: u32 = 64; // ageing of dependencies, in samples
+const DEBT_RATE: f64 = 0.5; // max share of a frame's budget used to pay back differential paths
 const SAFETY_WINDOW: f64 = 32.0;
 const Z_SAFETY: f64 = 4.0;
 const EXPLORE_PERIOD: i64 = 16;
-const KAPPA: f64 = 4.0; // poids de l'a priori bayésien sur la variance
+const KAPPA: f64 = 4.0; // weight of the Bayesian prior on the variance
 const PRIOR_FLOOR: f64 = 0.1;
-const REL_EPS: f64 = 0.01; // même ε que relMSE
+const REL_EPS: f64 = 0.01; // same ε as relMSE
 const EMA_CACHE: f64 = 1.0 / 64.0;
 const EMA_PIXEL: f64 = 0.1;
 const PROBES: usize = 1024;
-const TARGET_CAP: usize = 4; // en mode qualité cible : au plus 4 chemins/pixel/frame
+const TARGET_CAP: usize = 4; // in target-quality mode: at most 4 paths/pixel/frame
 const TARGET_PER_CELL: f64 = 32.0;
 
-/// Qui est suspect après un changement.
+/// Who is a suspect after a change.
 #[derive(Clone, Copy, PartialEq)]
 pub enum Deps {
-    /// régions traversées (H*)
+    /// regions crossed (H*)
     Spatial,
-    /// objets touchés (H0)
+    /// objects touched (H0)
     Objects,
-    /// toutes les cellules (pas de graphe)
+    /// every cell (no graph)
     All,
-    /// pondérées par l'énergie : géométrie comme Spatial ; pour un changement de lampe, la cellule
-    /// est suspecte si Σ_S fréquence_sommets(S) · magnitude(S) dépasse EPS_ENERGY × sa radiance
+    /// energy-weighted: geometry like Spatial; for a lamp change, the cell
+    /// is a suspect if Σ_S vertex_frequency(S) · magnitude(S) exceeds EPS_ENERGY × its radiance
     Energy,
 }
 
-/// Que fait-on d'une cellule suspecte.
+/// What is done with a suspect cell.
 #[derive(Clone, Copy, PartialEq)]
 pub enum Action {
     /// on jette l'historique
     Hard,
-    /// échantillons frais + z-test contre l'historique
+    /// fresh samples + z-test against the history
     ZTest,
-    /// chemins corrélés ancienne/nouvelle scène ; `cv` : variable de contrôle à β optimal,
-    /// sinon β = 1 (moyenne += Δ̂)
+    /// correlated paths old/new scene; `cv`: control variate with optimal β,
+    /// otherwise β = 1 (mean += Δ̂)
     Delta { cv: bool },
 }
 
@@ -67,7 +67,7 @@ pub enum OnEvent {
 pub enum Kind {
     PixelReset,
     PixelEma,
-    /// pipeline entièrement GPU (krc_gpu.wgsl) ; `sharc` : variante cache à hystérésis
+    /// fully GPU pipeline (krc_gpu.wgsl); `sharc`: hysteresis-cache variant
     Gpu { sharc: bool },
     Cache { neyman: bool, ema: bool, on_event: OnEvent, safety: bool, age: bool },
 }
@@ -76,9 +76,9 @@ pub enum Kind {
 pub struct Cfg {
     pub name: String,
     pub kind: Kind,
-    /// résolution du bitset de dépendances stocké par cellule (0 : 0,6 m, 1 : 1,2 m, 2 : 2,4 m)
+    /// resolution of the dependency bitset stored per cell (0: 0.6 m, 1: 1.2 m, 2: 2.4 m)
     pub dep_level: u8,
-    /// Mode qualité cible : erreur relative visée par cellule (sinon budget fixe).
+    /// Target-quality mode: relative error aimed at per cell (otherwise fixed budget).
     pub target: Option<f64>,
 }
 
@@ -127,25 +127,25 @@ pub fn all_methods() -> Vec<Cfg> {
     v
 }
 
-/// Description d'un changement de scène (tous les changements d'une frame, fusionnés).
+/// Description of a scene change (all of a frame's changes, merged).
 #[derive(Default)]
 pub struct Event {
     pub regions: Bits,
     pub objs: u128,
-    /// lampes dont l'état a changé, et poids allumée_avant − allumée_après
+    /// lamps whose state changed, and weight on_before − on_after
     pub lights: u64,
     pub light_w: Vec<f64>,
-    /// un objet a bougé (sinon seules des lampes ont changé)
+    /// an object moved (otherwise only lamps changed)
     pub geometry: bool,
-    /// changements de lampe : variation de radiance estimée (luminance) à la surface de
-    /// chaque région touchée par les sondes
+    /// lamp changes: estimated radiance change (luminance) at the surface of
+    /// each region touched by the probes
     pub mag: Vec<(usize, f64)>,
     pub probe_rays: usize,
 }
 
-/// Rayons-sondes depuis une lampe : régions de leurs premiers impacts, avec une magnitude.
-/// Chaque sonde transporte Φ/P (Φ = π·L·A pour un émetteur lambertien) ; une région qui en
-/// reçoit k voit sa radiance de surface changer d'environ ρ·kΦ/(P·π·A_R), avec A_R ≈ REGION².
+/// Probe rays from a lamp: regions of their first hits, with a magnitude.
+/// Each probe carries Φ/P (Φ = π·L·A for a Lambertian emitter); a region that receives
+/// k of them sees its surface radiance change by about ρ·kΦ/(P·π·A_R), with A_R ≈ REGION².
 fn light_probes(scene: &Scene, j: usize, seed: u64, bits: &mut Bits, mag: &mut Vec<(usize, f64)>) {
     let l = &scene.lights[j];
     mark_aabb(bits, &l.aabb());
@@ -180,7 +180,7 @@ pub fn event(prev: &State, cur: &State, prev_scene: &Scene, cur_scene: &Scene, f
     for (j, was, is) in [(0, prev.l0_on, cur.l0_on), (2, prev.l2_on, cur.l2_on)] {
         if was != is {
             ev.light_w[j] = was as u8 as f64 - is as u8 as f64;
-            // on sonde depuis l'état où la lampe est allumée
+            // probing from the state where the lamp is on
             let scene = if is { cur_scene } else { prev_scene };
             light_probes(scene, j, mix64(frame as u64 * 31 + j as u64), &mut ev.regions, &mut ev.mag);
             ev.objs |= 1u128 << (LIGHT_ID_BASE + j);
@@ -209,12 +209,12 @@ pub struct FrameStats {
     pub cells: usize,
     pub rmse: f64,
     pub relmse: f64,
-    /// relMSE et biais relatif signé, pièce 0 (A) et autres pièces
+    /// relMSE and signed relative bias, room 0 (A) and other rooms
     pub relmse_a: f64,
     pub relmse_b: f64,
     pub bias_a: f64,
     pub bias_b: f64,
-    /// temps passé à tracer des chemins (CPU ou GPU, transferts compris)
+    /// time spent tracing paths (CPU or GPU, transfers included)
     pub trace_ms: f64,
 }
 
@@ -255,7 +255,7 @@ fn post_var(n: f64, rel: f64, prior: f64) -> f64 {
     if n < 1.0 { prior } else { (KAPPA * prior + (n - 1.0) * rel) / (KAPPA + n - 1.0) }
 }
 
-/// (n effectif, variance relative brute) d'une cellule, en tenant compte de l'état suspect.
+/// (effective n, raw relative variance) of a cell, taking the suspect state into account.
 fn uncertainty(c: &Cell) -> (f64, f64) {
     let (n, var) = match &c.fresh {
         Some(f) => (f.n, c.main.var().max(f.var())),
@@ -265,16 +265,16 @@ fn uncertainty(c: &Cell) -> (f64, f64) {
     (n, var / (m * m + REL_EPS))
 }
 
-/// Gain marginal (réduction d'erreur image attendue) d'un échantillon de plus.
+/// Marginal gain (expected reduction of image error) of one more sample.
 fn gain(foot: f64, pv: f64, n: f64) -> f64 {
     if n < 1.0 { foot * 1e6 } else { foot * pv / (n * (n + 1.0)) }
 }
 
-/// Mise à jour différentielle à partir de paires corrélées (x = nouvelle scène, y = ancienne scène,
-/// même graine). L'historique sert de variable de contrôle :
+/// Differential update from correlated pairs (x = new scene, y = old scene,
+/// same seed). The history serves as a control variate:
 ///   μ = x̄ − β (ȳ − μ_cache),  Var μ ≈ Var(x − βy)/m + β² Var(μ_cache).
-/// β = 1 : correction pure par Δ̂ ; β = 0 : redémarrage sur les échantillons frais.
-/// Renvoie false si tous les Δ sont nuls (cellule inchangée : on garde tout).
+/// β = 1: pure correction by Δ̂; β = 0: restart from the fresh samples.
+/// Returns false if every Δ is zero (unchanged cell: everything is kept).
 fn apply_pairs(main: &mut Stat, pairs: &[(V3, V3)], cv: bool) -> bool {
     if pairs.iter().all(|(x, y)| x == y) {
         return false;
@@ -339,7 +339,7 @@ fn add_sample(c: &mut Cell, v: V3, rec: &DepRec, ema: bool, safety: bool, window
     }
 }
 
-/// `warmup` : frames statiques (état initial) simulées avant la séquence, non enregistrées.
+/// `warmup`: static frames (initial state) simulated before the sequence, not recorded.
 #[allow(clippy::too_many_arguments)]
 pub fn run(
     cfg: &Cfg,
@@ -361,7 +361,7 @@ pub fn run(
     let mut pixels: Vec<Stat> = vec![Stat::default(); world.len()];
     let mut cache = Cache::default();
     let mut rng = Rng::new(seed);
-    let mut debt = 0usize; // chemins différentiels à rembourser sur le budget des frames suivantes
+    let mut debt = 0usize; // differential paths to pay back from the budget of the following frames
 
     for t in 0..warmup + FRAMES {
         let frame = t.saturating_sub(warmup);
@@ -434,14 +434,14 @@ pub fn run(
                     (c as u32, r[rng.below(r.len())])
                 };
 
-                // 2. événement
+                // 2. event
                 let debug_rooms = std::env::var("KRC_DEBUG_ROOMS").is_ok() && ev.is_some();
                 let mut room_suspects = [0usize; 8];
                 let mut delta_tasks: Vec<(u32, u32)> = Vec::new();
                 if let Some(e) = &ev {
                     fs.probes = e.probe_rays;
                     let ev_coarse = crate::deps::Coarse::from(&e.regions);
-                    // magnitude par super-région : max des régions qu'elle contient
+                    // magnitude per super-region: max of the regions it contains
                     let mut mag_super = [0.0f64; crate::deps::SUPER];
                     for &(r, m) in &e.mag {
                         let s = crate::deps::super_of(r);
@@ -461,7 +461,7 @@ pub fn run(
                             Deps::Objects => c.objs & e.objs != 0,
                             Deps::All => true,
                             Deps::Energy if e.geometry => c.depends_on(&e.regions, &ev_coarse, cfg.dep_level),
-                            // il faut pouvoir être touchée (régions traversées) ET que l'effet attendu compte
+                            // it must be reachable (regions crossed) AND the expected effect must count
                             Deps::Energy => {
                                 c.depends_on(&e.regions, &ev_coarse, cfg.dep_level) && {
                                     let dl: f64 =
@@ -494,7 +494,7 @@ pub fn run(
                                         delta_tasks.push(pick(ci, &mut rng));
                                     }
                                 } else {
-                                    c.clear(); // invisible : on ne peut pas le mesurer, ça ne coûte rien
+                                    c.clear(); // invisible: it cannot be measured, and that costs nothing
                                     fs.hard_resets += 1;
                                 }
                             }
@@ -506,12 +506,12 @@ pub fn run(
                     for &c in &visible {
                         room_cells[((cache.cells[c].cx / 5.2) as usize).min(7)] += 1;
                     }
-                    eprintln!("{} frame {frame} suspects/visibles par pièce : {:?} / {:?}", cfg.name, room_suspects, room_cells);
+                    eprintln!("{} frame {frame} suspects/visible per room: {:?} / {:?}", cfg.name, room_suspects, room_cells);
                 }
-                // 2b. chemins corrélés : même graine dans l'ancienne et la nouvelle scène.
-                // Si le nouveau chemin ne touche ni la zone changée ni une lampe changée, l'ancien
-                // chemin est identique : Δ = 0 exactement, sans second tracé.
-                // Deux tours : M_DELTA0 chemins, puis M_DELTA au total pour les cellules dont un chemin est affecté.
+                // 2b. correlated paths: same seed in the old and the new scene.
+                // If the new path touches neither the changed area nor a changed lamp, the old
+                // path is identical: Δ = 0 exactly, without a second trace.
+                // Two rounds: M_DELTA0 paths, then M_DELTA in total for cells one of whose paths is affected.
                 if !delta_tasks.is_empty() {
                     let e = ev.as_ref().unwrap();
                     let cv = matches!(on_event, OnEvent::Invalidate(_, Action::Delta { cv: true }));
@@ -525,7 +525,7 @@ pub fn run(
                             })
                             .collect();
                         let res: Vec<(u32, V3, V3, bool, DepRec, bool)> = if !e.geometry {
-                            // lampes seules : l'ancienne radiance se déduit du même chemin
+                            // lamps only: the old radiance follows from the same path
                             let o = Opts { union: true, record: true, toggle_w: &e.light_w, spp: 1 };
                             let tr = tracer.trace(&scene, &reqs, &o);
                             tr.recs
@@ -544,7 +544,7 @@ pub fn run(
                                 .iter()
                                 .map(|r| r.regions.intersects(&e.regions) || r.lights & e.lights != 0)
                                 .collect();
-                            // l'ancien chemin n'est retracé que s'il peut différer
+                            // the old path is retraced only if it may differ
                             let idx: Vec<usize> = (0..reqs.len()).filter(|&i| affected[i]).collect();
                             let old_reqs: Vec<Req> = idx.iter().map(|&i| reqs[i]).collect();
                             let o = Opts { union: true, record: false, toggle_w: &[], spp: 1 };
@@ -564,8 +564,8 @@ pub fn run(
                     let mut results = trace(&delta_tasks, 0);
                     let mut second: Vec<(u32, u32)> = Vec::new();
                     let mut seen = std::collections::HashSet::new();
-                    // Δ = 0 sur M_DELTA0 chemins ne prouve rien pour une lampe (sa sélection NEE est aléatoire,
-                    // indépendante de son importance pour la cellule) : changement de lampes => M_DELTA partout.
+                    // Δ = 0 over M_DELTA0 paths proves nothing for a lamp (its NEE selection is random,
+                    // independent of its importance for the cell): lamp change => M_DELTA everywhere.
                     for r in &results {
                         if (r.3 || !e.geometry) && seen.insert(r.0) {
                             for _ in 0..M_DELTA - M_DELTA0 {
@@ -611,8 +611,8 @@ pub fn run(
                         tasks.push((pix_cells[k][rng.below(K)], k as u32));
                     }
                 } else {
-                    // a priori : médiane sur toutes les cellules mûres (suspectes comprises), avec plancher,
-                    // sinon les seules cellules restantes (p. ex. faces tournées vers le vide, σ = 0) l'effondrent
+                    // prior: median over every mature cell (suspects included), with a floor,
+                    // otherwise the only remaining cells (e.g. faces turned to the void, σ = 0) collapse it
                     let mut rels: Vec<f64> = visible
                         .iter()
                         .map(|&c| &cache.cells[c].main)
@@ -678,7 +678,7 @@ pub fn run(
                         }
                     }
                 }
-                // 4. tracé (parallèle)
+                // 4. tracing (parallel)
                 let reqs: Vec<Req> =
                     (0..tasks.len()).map(|i| surf_req(&gb[tasks[i].1 as usize], task_seed(seed, t, i))).collect();
                 let clock = Instant::now();
@@ -688,7 +688,7 @@ pub fn run(
                     tr.l.into_iter().zip(tr.recs).collect()
                 };
                 fs.trace_ms += clock.elapsed().as_secs_f64() * 1e3;
-                // 5. mise à jour
+                // 5. update
                 let mut touched = Vec::new();
                 for (i, (v, rec)) in results.iter().enumerate() {
                     let ci = tasks[i].0 as usize;
@@ -705,7 +705,7 @@ pub fn run(
                     add_sample(c, *v, rec, ema, safety, window);
                 }
                 fs.paths = tasks.len() + fs.delta_paths + fs.probes;
-                // 6. vérification (z-test) et filet de sécurité
+                // 6. verification (z-test) and safety net
                 for ci in touched {
                     let c = &mut cache.cells[ci];
                     if let Some(f) = c.fresh {
@@ -767,7 +767,7 @@ pub fn run(
         }
         if run_seed == 0 && SAVE_FRAMES.contains(&frame) {
             crate::image::save(&format!("{out_dir}/f{frame:03}.png"), world.w, world.h, &img);
-            // carte d'erreur relative (racine du relMSE par pixel, 1.0 = 100 %)
+            // relative error map (square root of the per-pixel relMSE, 1.0 = 100 %)
             let r = &refs[&state.id()];
             let err: Vec<V3> = (0..world.len())
                 .map(|k| {
@@ -785,7 +785,7 @@ pub fn run(
     stats
 }
 
-/// Métriques d'une image contre la référence, et sauvegarde des images choisies.
+/// Metrics of an image against the reference, and saving of the chosen images.
 fn evaluate(fs: &mut FrameStats, img: &[V3], refs: &HashMap<String, Vec<V3>>, state: &State, gb: &[Px], world: &World) {
     let r = &refs[&state.id()];
     let (rmse, relmse) = errors(img, r, gb);
@@ -810,7 +810,7 @@ fn evaluate(fs: &mut FrameStats, img: &[V3], refs: &HashMap<String, Vec<V3>>, st
     fs.bias_b = acc[3] / cnt[1].max(1.0);
 }
 
-/// Même séquence, pipeline entièrement GPU. `trace_ms` = somme des passes GPU (timestamps).
+/// Same sequence, fully GPU pipeline. `trace_ms` = sum of the GPU passes (timestamps).
 #[allow(clippy::too_many_arguments)]
 fn run_gpu(
     refs: &HashMap<String, Vec<V3>>,
@@ -822,7 +822,7 @@ fn run_gpu(
     sharc: bool,
     seed: u64,
 ) -> Vec<FrameStats> {
-    let Tracer::Gpu(g) = tracer else { panic!("méthode GPU : lancer avec KRC_GPU=1") };
+    let Tracer::Gpu(g) = tracer else { panic!("GPU method: run with KRC_GPU=1") };
     let mut krc = crate::gpu_krc::GpuKrc::new(g, *world, sharc, seed as u32);
     let mut stats = Vec::new();
     let mut prev_state = state_at(0);
@@ -847,7 +847,7 @@ fn run_gpu(
             fs.safety = f.safety as usize;
             fs.cells = f.visible as usize;
             fs.trace_ms = f.gpu_ms();
-            assert_eq!(f.overflow, 0, "table de cellules GPU saturée ({} cellules)", f.cells);
+            assert_eq!(f.overflow, 0, "GPU cell table full ({} cells)", f.cells);
             debug_assert!(f.surf as usize <= world.len());
             let mut img = f.image;
             for k in 0..world.len() {

@@ -1,10 +1,10 @@
-//! Scènes en triangles et structures d'accélération matérielles (ray query Vulkan via wgpu).
+//! Triangle scenes and hardware acceleration structures (Vulkan ray query through wgpu).
 use crate::gpu::Gpu;
 use crate::math::{v3, V3};
 use crate::scene::{Aabb, Light};
 
-/// Matériau : couleur (× texture `tex` si ≥ 0), rugosité GGX, métal, masque alpha.
-/// `rough >= 1` et `metal == 0` : lambertien pur (les scènes d'avant la vitrine).
+/// Material: colour (× texture `tex` if ≥ 0), GGX roughness, metal, alpha mask.
+/// `rough >= 1` and `metal == 0`: pure Lambertian (the scenes from before the showcase).
 #[derive(Clone, Copy, Debug)]
 pub struct Mat {
     pub tex: i32,
@@ -17,19 +17,19 @@ impl Mat {
     pub const DIFFUSE: Mat = Mat { tex: -1, rough: 1.0, metal: 0.0, mask: false };
 }
 
-/// Maillage indexé, un matériau par maillage.
+/// Indexed mesh, one material per mesh.
 #[derive(Clone)]
 pub struct Mesh {
     pub pos: Vec<[f32; 3]>,
     pub idx: Vec<u32>,
     pub albedo: [f32; 3],
-    /// coordonnées de texture (une par sommet)
+    /// texture coordinates (one per vertex)
     pub uv: Vec<[f32; 2]>,
     pub mat: Mat,
 }
 
-/// Textures de couleur, toutes ramenées à `size`², avec leurs mipmaps : `mips[l]` contient les
-/// couches à la suite (RGBA8 sRGB).
+/// Colour textures, all brought to `size`², with their mipmaps: `mips[l]` holds the
+/// layers one after the other (RGBA8 sRGB).
 pub struct TexArray {
     pub size: u32,
     pub layers: u32,
@@ -40,7 +40,7 @@ impl Mesh {
     fn new(albedo: [f32; 3]) -> Mesh {
         Mesh { pos: Vec::new(), idx: Vec::new(), albedo, uv: Vec::new(), mat: Mat::DIFFUSE }
     }
-    /// Quadrilatère a, b, c, d (dans l'ordre du contour).
+    /// Quad a, b, c, d (in outline order).
     fn quad(&mut self, a: V3, b: V3, c: V3, d: V3) {
         let i = self.pos.len() as u32;
         for p in [a, b, c, d] {
@@ -49,11 +49,11 @@ impl Mesh {
         self.uv.extend_from_slice(&[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
         self.idx.extend_from_slice(&[i, i + 1, i + 2, i, i + 2, i + 3]);
     }
-    /// Sphère UV de rayon r, centrée à l'origine.
+    /// UV sphere of radius r, centred at the origin.
     pub fn sphere(albedo: [f32; 3], r: f64, mat: Mat) -> Mesh {
         let mut m = Mesh::new(albedo);
         m.mat = mat;
-        let (nu, nv) = (384u32, 192u32); // fin : le reflet d'une sphère miroir ne doit pas montrer de facettes
+        let (nu, nv) = (384u32, 192u32); // fine: a mirror sphere's reflection must not show facets
         for j in 0..=nv {
             let th = std::f64::consts::PI * j as f64 / nv as f64;
             for i in 0..=nu {
@@ -71,7 +71,7 @@ impl Mesh {
         }
         m
     }
-    /// Boîte alignée (6 faces).
+    /// Axis-aligned box (6 faces).
     pub fn cuboid(albedo: [f32; 3], b: &Aabb) -> Mesh {
         let mut m = Mesh::new(albedo);
         let (l, h) = (b.min, b.max);
@@ -86,7 +86,7 @@ impl Mesh {
     }
 }
 
-/// Instance : maillage + translation (les objets mobiles sont des instances déplacées).
+/// Instance: mesh + translation (moving objects are displaced instances).
 #[derive(Clone, Copy)]
 pub struct Instance {
     pub mesh: usize,
@@ -98,7 +98,7 @@ pub struct TriScene {
     pub instances: Vec<Instance>,
     pub lights: Vec<Light>,
     pub bounds: Aabb,
-    /// textures de couleur (vitrine) ; None : pas de texture
+    /// colour textures (showcase); None: no texture
     pub tex: Option<&'static TexArray>,
 }
 
@@ -118,9 +118,9 @@ impl TriScene {
     }
 }
 
-/// Cornell box (5,5 m), boîte haute fixe, boîte basse mobile (instance 1), plafonnier (lampe 0)
-/// et une seconde lampe chaude à l'avant gauche (lampe 1) : mêmes événements que la séquence
-/// des pièces (boîte qui bouge, lampe qui s'allume, lampe qui s'éteint).
+/// Cornell box (5.5 m), fixed tall box, moving short box (instance 1), ceiling light (lamp 0)
+/// and a second warm lamp at the front left (lamp 1): the same events as the rooms
+/// sequence (box that moves, lamp that switches on, lamp that switches off).
 pub fn cornell(step: u32, light_on: bool, lamp2_on: bool) -> TriScene {
     let white = [0.73, 0.73, 0.73];
     let red = [0.65, 0.05, 0.05];
@@ -140,7 +140,7 @@ pub fn cornell(step: u32, light_on: bool, lamp2_on: bool) -> TriScene {
     let meshes = vec![room, left, right, tall, short];
     let shift = v3(3.3 - step as f64 * 0.1, 0.0, 2.6);
     let mut instances: Vec<Instance> = (0..4).map(|m| Instance { mesh: m, offset: V3::default() }).collect();
-    instances.insert(1, Instance { mesh: 4, offset: shift }); // instance 1 = boîte mobile
+    instances.insert(1, Instance { mesh: 4, offset: shift }); // instance 1 = moving box
     let lights = vec![
         Light { center: v3(2.75, s - 0.01, 2.75), hx: 0.65, hz: 0.55, emission: V3::splat(15.0), on: light_on },
         Light { center: v3(1.0, s - 0.01, 4.4), hx: 0.35, hz: 0.35, emission: v3(40.0, 30.0, 18.0), on: lamp2_on },
@@ -148,19 +148,19 @@ pub fn cornell(step: u32, light_on: bool, lamp2_on: bool) -> TriScene {
     TriScene { meshes, instances, lights, bounds: Aabb { min: V3::splat(-0.1), max: V3::splat(s + 0.1) }, tex: None }
 }
 
-/// Structures d'accélération GPU d'une scène : une BLAS par maillage, une TLAS d'instances.
+/// GPU acceleration structures of a scene: one BLAS per mesh, one TLAS of instances.
 pub struct Accel {
-    /// deux TLAS alternées : celle de la frame courante et celle de la précédente
+    /// two alternating TLAS: the current frame's and the previous one's
     pub tlas: [wgpu::TlasPackage; 2],
     pub blas: Vec<wgpu::Blas>,
-    /// sommets (vec4 alignés) et indices de tous les maillages, pour les normales dans le shader
+    /// vertices (aligned vec4) and indices of every mesh, for the normals in the shader
     pub verts: wgpu::Buffer,
     pub idx: wgpu::Buffer,
-    /// par maillage : décalage des sommets, des indices, matériau
+    /// per mesh: vertex offset, index offset, material
     pub mesh_table: wgpu::Buffer,
-    /// coordonnées de texture de tous les sommets
+    /// texture coordinates of every vertex
     pub uvs: wgpu::Buffer,
-    /// tableau de textures de couleur (1×1 blanc si la scène n'en a pas)
+    /// array of colour textures (1×1 white if the scene has none)
     pub tex_view: wgpu::TextureView,
     vbufs: Vec<wgpu::Buffer>,
     ibufs: Vec<wgpu::Buffer>,
@@ -181,7 +181,7 @@ pub struct GMesh {
     pub pad: [f32; 3],
 }
 
-/// Vue d'un tableau de textures sur GPU (mipmaps comprises) ; 1×1 blanc si `tex` est None.
+/// View of a texture array on the GPU (mipmaps included); 1×1 white if `tex` is None.
 pub fn tex_view(gpu: &Gpu, tex: Option<&TexArray>) -> wgpu::TextureView {
     let white = TexArray { size: 1, layers: 1, mips: vec![vec![255; 4]] };
     let t = tex.unwrap_or(&white);
@@ -311,7 +311,7 @@ impl Accel {
         a
     }
 
-    /// Reconstruit la TLAS `k` avec les positions courantes des instances.
+    /// Rebuilds TLAS `k` with the instances' current positions.
     pub fn build_tlas(&mut self, gpu: &Gpu, scene: &TriScene, k: usize) {
         self.build(gpu, scene, k, false);
     }
@@ -346,7 +346,7 @@ impl Accel {
     }
 }
 
-/// `krc rtsmoke` : normales d'une Cornell box vues par ray query matériel (validation de l'API).
+/// `krc rtsmoke`: normals of a Cornell box seen through hardware ray query (API validation).
 pub fn smoke(gpu: &Gpu) {
     use wgpu::util::DeviceExt;
     let scene = cornell(0, true, false);
@@ -443,12 +443,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         (0..(w * h) as usize).map(|k| v3(data[4 * k] as f64, data[4 * k + 1] as f64, data[4 * k + 2] as f64)).collect();
     std::fs::create_dir_all("results/rt").unwrap();
     crate::image::save("results/rt/smoke_cornell.png", w as usize, h as usize, &px);
-    println!("ray query OK : {} triangles, image results/rt/smoke_cornell.png", scene.triangles());
+    println!("ray query OK: {} triangles, image results/rt/smoke_cornell.png", scene.triangles());
 }
 
-/// Bloc de géométrie du shader pour les triangles : ray query matériel sur la TLAS courante
-/// (binding 1) ou précédente (binding 3) ; normale du triangle, albédo du maillage.
-pub const TRI_GEOMETRY: &str = r#"// <geometrie> triangles : ray query matériel
+/// Geometry block of the shader for triangles: hardware ray query on the current TLAS
+/// (binding 1) or the previous one (binding 3); triangle normal, mesh albedo.
+pub const TRI_GEOMETRY: &str = r#"// <geometry> triangles: hardware ray query
 struct GMesh { first_vertex: u32, first_index: u32, tex: i32, flags: u32, albedo: vec3<f32>, rough: f32, metal: f32, p0: f32, p1: f32, p2: f32 };
 @group(0) @binding(1) var acc_cur: acceleration_structure;
 @group(0) @binding(3) var acc_prev: acceleration_structure;
@@ -459,8 +459,8 @@ struct GMesh { first_vertex: u32, first_index: u32, tex: i32, flags: u32, albedo
 @group(0) @binding(33) var tex_samp: sampler;
 @group(0) @binding(34) var<storage, read> uvs: array<vec2<f32>>;
 
-// couleur de base (et alpha) au point d'impact : texture × facteur ; niveau de mip d'après la
-// distance parcourue par le rayon
+// base colour (and alpha) at the hit point: texture × factor; mip level from the
+// distance travelled by the ray
 fn surface_color(r: RayIntersection) -> vec4<f32> {
     let m = meshes[r.instance_custom_index];
     if (m.tex < 0) { return vec4<f32>(m.albedo, 1.0); }
@@ -473,7 +473,7 @@ fn surface_color(r: RayIntersection) -> vec4<f32> {
     return vec4<f32>(c.rgb * m.albedo, c.a);
 }
 
-// impact le plus proche, en traversant les texels transparents des maillages à masque alpha
+// closest hit, going through the transparent texels of alpha-masked meshes
 fn rq_closest(o: vec3<f32>, d: vec3<f32>, tmax: f32) -> RayIntersection {
     var t0 = 0.0;
     var r = rq_trace(o, d, tmax, 0u);
@@ -528,8 +528,8 @@ fn scene_hit(o: vec3<f32>, d: vec3<f32>) -> Hit {
 
 fn occluder(o: vec3<f32>, d: vec3<f32>, tmax: f32) -> Occ {
     var r: Occ;
-    // premier impact quelconque (rapide) ; s'il tombe sur un maillage à masque alpha, on refait
-    // une recherche du plus proche qui traverse les texels transparents
+    // any first hit (fast); if it falls on an alpha-masked mesh, the closest one is searched
+    // again going through transparent texels
     let i = rq_trace(o, d, tmax, RAY_FLAG_TERMINATE_ON_FIRST_HIT);
     var found = i.kind != RAY_QUERY_INTERSECTION_NONE;
     var t = i.t;
@@ -544,7 +544,7 @@ fn occluder(o: vec3<f32>, d: vec3<f32>, tmax: f32) -> Occ {
 }
 "#;
 
-/// Vue de la Cornell box (carrée).
+/// View of the Cornell box (square).
 pub fn cornell_view(size: usize) -> crate::gpu_krc::View {
     crate::gpu_krc::View {
         w: size,
@@ -563,18 +563,18 @@ pub fn cornell_at(frame: u32) -> TriScene {
     cornell(s.box_step, s.l0_on, s.l2_on)
 }
 
-/// Une scène en triangles pour les bancs : nom, vue, scène à chaque frame de la séquence.
+/// A triangle scene for the benches: name, view, scene at each frame of the sequence.
 pub struct TriSetup {
     pub name: String,
     pub view: crate::gpu_krc::View,
     pub at: fn(u32) -> TriScene,
     pub ref_spp: u32,
-    /// caméra mobile : (œil, point visé) à la frame t ; None = caméra fixe `view`
+    /// moving camera: (eye, target) at frame t; None = fixed camera `view`
     pub cam: Option<fn(u32) -> (V3, V3)>,
 }
 
 impl TriSetup {
-    /// Vue de la frame t (même résolution et même champ que `view`).
+    /// View of frame t (same resolution and same field as `view`).
     pub fn view_at(&self, t: u32) -> crate::gpu_krc::View {
         let mut v = self.view;
         if let Some(cam) = self.cam {
@@ -587,7 +587,7 @@ impl TriSetup {
         v
     }
 
-    /// Nom de la référence de la frame t : l'état de la scène si la caméra est fixe, sinon la frame.
+    /// Name of frame t's reference: the scene's state if the camera is fixed, otherwise the frame.
     pub fn ref_key(&self, t: u32) -> String {
         match self.cam {
             Some(_) => format!("f{t:03}"),
@@ -600,7 +600,7 @@ pub fn cornell_setup(size: usize) -> TriSetup {
     TriSetup { name: format!("cornell_{size}"), view: cornell_view(size), at: cornell_at, ref_spp: 4096, cam: None }
 }
 
-/// Cornell box, caméra mobile : travelling avant (z 13 → 9) avec un balancement latéral.
+/// Cornell box, moving camera: forward dolly (z 13 → 9) with a sideways sway.
 pub fn cornell_cam_setup(size: usize) -> TriSetup {
     fn cam(t: u32) -> (V3, V3) {
         let u = t as f64 / 119.0;
@@ -610,10 +610,10 @@ pub fn cornell_cam_setup(size: usize) -> TriSetup {
     TriSetup { name: format!("cornell_cam_{size}"), cam: Some(cam), ..cornell_setup(size) }
 }
 
-/// relMSE d'une frame sur les pixels de surface : brute, et sans le 0,1 % de pixels les plus
-/// fautifs (pratique courante du path guiding : une luciole isolée ne doit pas décider seule).
-/// Troisième valeur : luminance totale image / référence, pour voir un biais que la relMSE cache
-/// (avec y² + 0,01 au dénominateur, une scène sombre récompense une image trop sombre).
+/// relMSE of a frame over surface pixels: raw, and without the worst 0.1 % of
+/// pixels (common practice in path guiding: an isolated firefly must not decide alone).
+/// Third value: total image luminance / reference, to see a bias relMSE hides
+/// (with y² + 0.01 in the denominator, a dark scene rewards a too-dark image).
 pub fn frame_err(img: &[V3], kinds: &[u8], r: &[V3]) -> (f64, f64, f64) {
     let mut px: Vec<f64> = Vec::with_capacity(img.len());
     let (mut li, mut lr) = (0.0, 0.0);
@@ -640,8 +640,8 @@ pub fn frame_err(img: &[V3], kinds: &[u8], r: &[V3]) -> (f64, f64, f64) {
     (raw, trim, li / lr.max(1e-12))
 }
 
-/// `krc cornell|sponza` : la séquence de 120 frames (objet qui bouge, lampe allumée, lampe
-/// éteinte) sur une scène en triangles, ray tracing matériel, pipeline entièrement GPU.
+/// `krc cornell|sponza`: the 120-frame sequence (object that moves, lamp switched on, lamp
+/// switched off) on a triangle scene, hardware ray tracing, fully GPU pipeline.
 pub fn run_tri(gpu: &Gpu, seeds: u64, setup: &TriSetup) {
     use crate::gpu_krc::GpuKrc;
     use crate::grid::Grid;
@@ -653,7 +653,7 @@ pub fn run_tri(gpu: &Gpu, seeds: u64, setup: &TriSetup) {
     let base = at(0);
     let grid = Grid::fit(&base.bounds);
     eprintln!(
-        "grille : régions {:.3} m, {:?} ({} régions), super-régions {:?}",
+        "grid: regions {:.3} m, {:?} ({} regions), super-regions {:?}",
         grid.region,
         grid.dims,
         grid.dims.iter().product::<i64>(),
@@ -675,23 +675,23 @@ pub fn run_tri(gpu: &Gpu, seeds: u64, setup: &TriSetup) {
             let (img, _) = rk.reference_tri(&at(f), setup.ref_spp);
             save_raw(&path, &img);
             crate::image::save(&format!("{dir}/{id}.png"), view.w, view.h, &img);
-            eprintln!("référence {id} : {:.1} s", t.elapsed().as_secs_f64());
+            eprintln!("reference {id}: {:.1} s", t.elapsed().as_secs_f64());
             img
         });
         refs.insert(id, img);
     }
     let phases: [(&str, u32, u32); 6] = [
-        ("tout", 0, 120),
-        ("statique", 30, 40),
-        ("boite", 40, 64),
-        ("apres_boite", 64, 80),
-        ("lampe_on", 80, 100),
-        ("lampe_off", 100, 120),
+        ("all", 0, 120),
+        ("static", 30, 40),
+        ("box", 40, 64),
+        ("after_box", 64, 80),
+        ("lamp_on", 80, 100),
+        ("lamp_off", 100, 120),
     ];
     let mut summary = String::from("method,phase,relmse_mean,relmse_std,gpu_ms,paths_per_frame,trim_mean,trim_std,lum_ratio\n");
     use crate::gpu_krc::Method;
-    // tri_sharc : cache SHaRC-like maison ; tri_sharc_nv : portage du SHaRC officiel de NVIDIA,
-    // vue du cache au premier impact ; tri_sharc_nv_render : sa passe Render (1 chemin/px)
+    // tri_sharc: home-made SHaRC-like cache; tri_sharc_nv: port of NVIDIA's official SHaRC,
+    // cache view at the first hit; tri_sharc_nv_render: its Render pass (1 path/px)
     let all = [
         ("tri_krc", Method::Krc, false),
         ("tri_sharc", Method::SharcLike, false),
@@ -719,7 +719,7 @@ pub fn run_tri(gpu: &Gpu, seeds: u64, setup: &TriSetup) {
                 k.set_view(setup.view_at(t));
                 let f = k.frame_tri(&scene, &prev, t);
                 if f.overflow > 0 {
-                    eprintln!("{name} graine {seed} frame {t} : {} insertions perdues (table pleine)", f.overflow);
+                    eprintln!("{name} seed {seed} frame {t}: {} insertions lost (table full)", f.overflow);
                 }
                 let (rel, trim, lr) = frame_err(&f.image, &f.kinds, &refs[&setup.ref_key(t)]);
                 let paths = f.regular_paths + f.delta_paths + f.probe_rays as u32;
@@ -774,9 +774,9 @@ pub fn run_tri(gpu: &Gpu, seeds: u64, setup: &TriSetup) {
     std::fs::write(format!("results/{}/{file}", setup.name), summary).unwrap();
 }
 
-/// `krc pareto [taille]` : erreur contre temps GPU, KRC et SHaRC, pour plusieurs budgets
-/// (chemins par pixel et par frame). Erreur : un passage avec relecture d'image ; temps : deux
-/// passages sans relecture (chauffe, puis mesure ; médiane par frame).
+/// `krc pareto [size]`: error against GPU time, KRC and SHaRC, for several budgets
+/// (paths per pixel per frame). Error: one pass with image readback; time: two
+/// passes without readback (warm-up, then measurement; median per frame).
 pub fn pareto(gpu: &Gpu, setup: &TriSetup) {
     use crate::gpu_krc::GpuKrc;
     use crate::grid::Grid;
@@ -791,15 +791,15 @@ pub fn pareto(gpu: &Gpu, setup: &TriSetup) {
         .map(|f| setup.ref_key(f))
         .map(|id| {
             let img =
-                load_raw(&format!("{dir}/{id}.bin"), view.len()).expect("références manquantes : lancer d'abord la séquence");
+                load_raw(&format!("{dir}/{id}.bin"), view.len()).expect("missing references: run the sequence first");
             (id, img)
         })
         .collect();
     let mut csv =
         String::from("method,ppp,relmse,relmse_static,relmse_dynamic,ms_median,ms_mean,ms_p95,trim,trim_static,trim_dynamic\n");
     use crate::gpu_krc::{Method, ShParams};
-    // (méthode, budget « chemins par pixel », paramètres SHaRC). Pour le SHaRC officiel, le budget
-    // est sa densité de mise à jour : 1 pixel par bloc d×d, soit 1/d² chemin par pixel.
+    // (method, budget "paths per pixel", SHaRC parameters). For the official SHaRC, the budget
+    // is its update density: 1 pixel per d×d block, i.e. 1/d² path per pixel.
     let mut variants: Vec<(String, Method, f32, ShParams)> = Vec::new();
     let d = ShParams::default();
     for ppp in [0.25f32, 0.5, 1.0, 2.0] {
@@ -859,14 +859,14 @@ pub fn pareto(gpu: &Gpu, setup: &TriSetup) {
             ms.sort_by(|a, b| a.total_cmp(b));
             let (med, p95) = (ms[ms.len() / 2], ms[ms.len() * 95 / 100]);
             println!(
-                "{name:<14} {ppp:>5} chemin/px : relMSE {:.3e} (statique {:.2e}, dynamique {:.2e}) | GPU médiane {med:.2} ms, moyenne {:.2} ms, p95 {p95:.2} ms",
+                "{name:<14} {ppp:>5} path/px: relMSE {:.3e} (static {:.2e}, dynamic {:.2e}) | GPU median {med:.2} ms, mean {:.2} ms, p95 {p95:.2} ms",
                 mean(&rel),
                 mean(&rel_s),
                 mean(&rel_d),
                 mean(&ms)
             );
             println!(
-                "{:<14} {ppp:>5} chemin/px : relMSE sans 0,1 % {:.3e} (statique {:.2e}, dynamique {:.2e})",
+                "{:<14} {ppp:>5} path/px: relMSE without 0.1 % {:.3e} (static {:.2e}, dynamic {:.2e})",
                 format!("{name}*"),
                 mean(&tr),
                 mean(&tr_s),
@@ -889,7 +889,7 @@ pub fn pareto(gpu: &Gpu, setup: &TriSetup) {
     std::fs::write(format!("results/{}/{file}", setup.name), csv).unwrap();
 }
 
-/// `krc spikes [taille]` : composition du temps GPU des frames d'événement (KRC, 1 chemin/px).
+/// `krc spikes [size]`: breakdown of the GPU time of event frames (KRC, 1 path/px).
 pub fn spikes(gpu: &Gpu, setup: &TriSetup) {
     use crate::gpu_krc::GpuKrc;
     use crate::grid::Grid;
@@ -910,7 +910,7 @@ pub fn spikes(gpu: &Gpu, setup: &TriSetup) {
                 let mut p: Vec<String> = f.passes.iter().filter(|x| x.1 > 0.05).map(|(n, ms)| format!("{n} {ms:.2}")).collect();
                 p.sort();
                 println!(
-                    "frame {t:>3} : {:.2} ms | suspects {} | en attente {} | chemins corrélés {} (retracés {}) | ordinaires {} | {}",
+                    "frame {t:>3}: {:.2} ms | suspects {} | on hold {} | correlated paths {} (retraced {}) | ordinary {} | {}",
                     f.gpu_ms(),
                     f.suspects,
                     f.pending,
@@ -924,15 +924,15 @@ pub fn spikes(gpu: &Gpu, setup: &TriSetup) {
     }
 }
 
-/// Géométrie de Sponza (Khronos glTF-Sample-Assets, CC-BY : Crytek / Frank Meinl), chargée une
-/// fois : une primitive = un maillage ; albédo = couleur de base (les textures sont ignorées),
-/// légèrement teintée par matériau pour distinguer les surfaces.
+/// Sponza geometry (Khronos glTF-Sample-Assets, CC-BY: Crytek / Frank Meinl), loaded
+/// once: one primitive = one mesh; albedo = base colour (textures ignored),
+/// slightly tinted per material to tell surfaces apart.
 fn sponza_meshes() -> &'static (Vec<Mesh>, Aabb) {
     static CELL: std::sync::OnceLock<(Vec<Mesh>, Aabb)> = std::sync::OnceLock::new();
     CELL.get_or_init(|| {
         let dir = "assets/sponza";
         let gltf =
-            gltf::Gltf::open(format!("{dir}/Sponza.gltf")).expect("assets/sponza/Sponza.gltf : lancer tools/fetch_sponza.sh");
+            gltf::Gltf::open(format!("{dir}/Sponza.gltf")).expect("assets/sponza/Sponza.gltf: run tools/fetch_sponza.sh");
         let bin = std::fs::read(format!("{dir}/Sponza.bin")).expect("Sponza.bin");
         let scale = 0.008f32;
         let mut meshes = Vec::new();
@@ -964,8 +964,8 @@ fn sponza_meshes() -> &'static (Vec<Mesh>, Aabb) {
     })
 }
 
-/// Sponza éclairée par trois lampes suspendues dans l'atrium (lampe 0 : centrale, s'éteint) et une
-/// lampe d'appoint chaude dans la galerie basse (lampe 1, s'allume) ; une boîte se déplace au sol.
+/// Sponza lit by three lamps hanging in the atrium (lamp 0: central, switches off) and a
+/// warm fill lamp in the lower gallery (lamp 1, switches on); a box moves on the floor.
 pub fn sponza(step: u32, l0_on: bool, l2_on: bool) -> TriScene {
     let (meshes0, bounds) = sponza_meshes();
     let mut meshes = meshes0.clone();
@@ -989,7 +989,7 @@ pub fn sponza_at(frame: u32) -> TriScene {
 }
 
 pub fn sponza_setup(w: usize, h: usize) -> TriSetup {
-    // dans l'atrium (ouvert vers le ciel pour |z| < ~1,9 m), devant le mur du fond (x ≈ −12)
+    // in the atrium (open to the sky for |z| < ~1.9 m), in front of the back wall (x ≈ −12)
     let eye = v3(-10.0, 1.6, -0.3);
     let fwd = (v3(10.0, 4.0, -0.3) - eye).norm();
     let right = fwd.cross(v3(0.0, 1.0, 0.0)).norm();
@@ -998,14 +998,14 @@ pub fn sponza_setup(w: usize, h: usize) -> TriSetup {
         name: format!("sponza_{w}x{h}"),
         view: crate::gpu_krc::View { w, h, eye, fwd, right, up: right.cross(fwd), th: tv * w as f64 / h as f64, tv },
         at: sponza_at,
-        // petites lampes brillantes près des murs : lucioles à 4096 spp
+        // small bright lamps close to the walls: fireflies at 4096 spp
         ref_spp: 16384,
         cam: None,
     }
 }
 
-/// Sponza, caméra mobile : on marche dans l'atrium (9 m en 120 frames, ~4,5 m/s à 60 Hz) en
-/// regardant à gauche et à droite (lacet ±17°) et en ondulant latéralement.
+/// Sponza, moving camera: walking through the atrium (9 m in 120 frames, ~4.5 m/s at 60 Hz)
+/// looking left and right (yaw ±17°) and swaying sideways.
 pub fn sponza_cam_setup(w: usize, h: usize) -> TriSetup {
     fn cam(t: u32) -> (V3, V3) {
         let u = t as f64 / 119.0;
@@ -1017,7 +1017,7 @@ pub fn sponza_cam_setup(w: usize, h: usize) -> TriSetup {
     TriSetup { name: format!("sponza_cam_{w}x{h}"), cam: Some(cam), ..sponza_setup(w, h) }
 }
 
-/// `krc sponzadebug` : ce que voit la caméra et où tombent les sondes de chaque lampe.
+/// `krc sponzadebug`: what the camera sees and where each lamp's probes land.
 pub fn sponza_debug(gpu: &Gpu) {
     use crate::gpu_krc::GpuKrc;
     use crate::grid::Grid;
@@ -1028,7 +1028,7 @@ pub fn sponza_debug(gpu: &Gpu) {
     let f = k.frame_tri(&scene, &scene, 0);
     let n = f.kinds.len() as f64;
     let count = |v: u8| f.kinds.iter().filter(|&&x| x == v).count() as f64 / n;
-    println!("pixels : vides {:.2}, lampes {:.2}, surfaces {:.2}", count(0), count(1), count(2));
+    println!("pixels: empty {:.2}, lamps {:.2}, surfaces {:.2}", count(0), count(1), count(2));
     let v = setup.view;
     let mut rays = Vec::new();
     for (sx, sy) in [(0.0, 0.0), (-0.9, 0.9), (0.9, 0.9), (-0.9, -0.9), (0.9, -0.9), (0.0, -0.9), (0.0, 0.9)] {
@@ -1036,8 +1036,8 @@ pub fn sponza_debug(gpu: &Gpu) {
     }
     for ((_, d), h) in rays.iter().zip(k.trace_rays(&rays, 0)) {
         match h {
-            Some((p, a)) => println!("rayon caméra {:?} : impact à {:.2} m en {:?}, albédo {:?}", d, (p - v.eye).len(), p, a),
-            None => println!("rayon caméra {:?} : rien", d),
+            Some((p, a)) => println!("camera ray {:?}: hit at {:.2} m at {:?}, albedo {:?}", d, (p - v.eye).len(), p, a),
+            None => println!("camera ray {:?}: nothing", d),
         }
     }
     for z in [-8.0, -6.0, -4.0, -2.0, -1.0, 0.0, 1.0, 2.0, 4.0, 6.0] {
@@ -1045,7 +1045,7 @@ pub fn sponza_debug(gpu: &Gpu) {
         let rays = vec![(eye, v3(0.0, 1.0, 0.0)), (eye, v3(0.0, -1.0, 0.0))];
         let h = k.trace_rays(&rays, 0);
         let d: Vec<String> = h.iter().map(|x| x.map_or("∞".to_string(), |(p, _)| format!("{:.2}", (p - eye).len()))).collect();
-        println!("x=-5, z={z:>5} : au-dessus {}, au-dessous {}", d[0], d[1]);
+        println!("x=-5, z={z:>5}: above {}, below {}", d[0], d[1]);
     }
     for ex in [-11.5, -10.5, -9.5, -8.0] {
         let eye = v3(ex, 1.8, -0.3);
@@ -1061,7 +1061,7 @@ pub fn sponza_debug(gpu: &Gpu) {
         let h = k.trace_rays(&rays, 0);
         let dist: Vec<String> = h.iter().map(|x| x.map_or("∞".to_string(), |(p, _)| format!("{:.1}", (p - eye).len()))).collect();
         println!(
-            "œil x = {ex} : distances libres (avant, haut-gauche, haut-droite, bas-gauche, bas-droite, zénith) = {:?}",
+            "eye x = {ex}: free distances (forward, up-left, up-right, down-left, down-right, zenith) = {:?}",
             dist
         );
     }
@@ -1071,7 +1071,7 @@ pub fn sponza_debug(gpu: &Gpu) {
         let mean = d.iter().sum::<f64>() / d.len().max(1) as f64;
         let near = d.iter().filter(|&&x| x < 0.5).count();
         println!(
-            "lampe {j} en {:?} : {} sondes touchent, distance moyenne {:.2} m, {} à moins de 0,5 m",
+            "lamp {j} at {:?}: {} probes hit, mean distance {:.2} m, {} closer than 0.5 m",
             l.center,
             hits.len(),
             mean,
@@ -1080,9 +1080,9 @@ pub fn sponza_debug(gpu: &Gpu) {
     }
 }
 
-/// `krc bias [cornell|sponza]` : luminance moyenne image / référence (Σ sur les pixels de surface),
-/// pour séparer un biais d'un bruit. (a) scène finale statique depuis un cache vide,
-/// (b) séquence complète, KRC et SHaRC.
+/// `krc bias [cornell|sponza]`: mean image luminance / reference (Σ over surface pixels),
+/// to separate a bias from noise. (a) final static scene from an empty cache,
+/// (b) full sequence, KRC and SHaRC.
 pub fn bias(gpu: &Gpu, setup: &TriSetup) {
     use crate::gpu_krc::GpuKrc;
     use crate::grid::Grid;
@@ -1093,7 +1093,7 @@ pub fn bias(gpu: &Gpu, setup: &TriSetup) {
     let dir = format!("results/ref_{}", setup.name);
     let refs: std::collections::HashMap<String, Vec<V3>> = (0..FRAMES)
         .map(|f| setup.ref_key(f))
-        .map(|id| (id.clone(), load_raw(&format!("{dir}/{id}.bin"), view.len()).expect("références manquantes")))
+        .map(|id| (id.clone(), load_raw(&format!("{dir}/{id}.bin"), view.len()).expect("missing references")))
         .collect();
     let ratio = |f: &crate::gpu_krc::GpuFrame, r: &[V3]| {
         let (mut a, mut b) = (0.0, 0.0);
@@ -1107,7 +1107,7 @@ pub fn bias(gpu: &Gpu, setup: &TriSetup) {
     };
     let fs: u32 = std::env::var("KRC_BIAS_FRAME").ok().and_then(|s| s.parse().ok()).unwrap_or(FRAMES - 1);
     let last = at(fs);
-    // (nom, sharc, plafond de variance, n_post, variance d'historique, plafond des cellules sans différence)
+    // (name, sharc, variance cap, n_post, history variance, cap of no-difference cells)
     let variants = [
         ("krc_avant", false, 0.0f32, 64.0f32, false, false),
         ("+plafond_var", false, 1.0, 64.0, false, false),
@@ -1123,7 +1123,7 @@ pub fn bias(gpu: &Gpu, setup: &TriSetup) {
         k.s2_hist = h;
         k.zero_cap = z;
         let r = &refs[&setup.ref_key(fs)];
-        let mut line = format!("(a) {name:<13} statique, état final :");
+        let mut line = format!("(a) {name:<13} static, final state:");
         for t in 0..200 {
             let f = k.frame_tri(&last, &last, t);
             if [0, 4, 9, 19, 39, 59, 99, 199].contains(&t) {
@@ -1139,7 +1139,7 @@ pub fn bias(gpu: &Gpu, setup: &TriSetup) {
         k.s2_hist = h;
         k.zero_cap = z;
         let mut prev = at(0);
-        let mut line = format!("(b) {name:<13} séquence :");
+        let mut line = format!("(b) {name:<13} sequence:");
         let mut err = 0.0;
         for t in 0..FRAMES {
             let scene = at(t);
@@ -1152,16 +1152,16 @@ pub fn bias(gpu: &Gpu, setup: &TriSetup) {
                 line += &format!(" f{t} {:.3}", ratio(&f, &refs[&setup.ref_key(t)]));
             }
             if t == 80 || t == 100 {
-                line += &format!(" [susp {} zéro {}]", f.suspects, f.delta_zero);
+                line += &format!(" [susp {} zero {}]", f.suspects, f.delta_zero);
             }
         }
         println!("{line} | relMSE* {err:.3e}");
     }
 }
 
-/// `krc sharccheck [cornell|sponza]` : validation du portage SHaRC. Scène statique (frame 39),
-/// caméra fixe, 300 frames ; avec des réglages généreux (tous les pixels mis à jour, longue
-/// accumulation, voxels fins), le cache doit converger vers la référence.
+/// `krc sharccheck [cornell|sponza]`: validation of the SHaRC port. Static scene (frame 39),
+/// fixed camera, 300 frames; with generous settings (every pixel updated, long
+/// accumulation, fine voxels), the cache must converge to the reference.
 pub fn sharc_check(gpu: &Gpu, setup: &TriSetup) {
     use crate::gpu_krc::{GpuKrc, Method, ShParams};
     use crate::grid::Grid;
@@ -1170,11 +1170,11 @@ pub fn sharc_check(gpu: &Gpu, setup: &TriSetup) {
     let scene = at(39);
     let grid = Grid::fit(&scene.bounds);
     let r =
-        load_raw(&format!("results/ref_{}/{}.bin", setup.name, setup.ref_key(39)), view.len()).expect("références manquantes");
+        load_raw(&format!("results/ref_{}/{}.bin", setup.name, setup.ref_key(39)), view.len()).expect("missing references");
     let d = ShParams::default();
     let variants = [
-        ("défaut NVIDIA", d),
-        ("tous les pixels", ShParams { downscale: 1, ..d }),
+        ("NVIDIA default", d),
+        ("every pixel", ShParams { downscale: 1, ..d }),
         ("+ accumulation 1024", ShParams { downscale: 1, accum_frames: 1024, ..d }),
         ("+ voxels 8× plus fins", ShParams { downscale: 1, accum_frames: 1024, scene_scale: 400.0, ..d }),
     ];
@@ -1192,7 +1192,7 @@ pub fn sharc_check(gpu: &Gpu, setup: &TriSetup) {
         println!("{line}");
     }
     let mut k = GpuKrc::with_method(gpu, view, grid, Some(&scene), Method::Krc, 5);
-    let mut line = format!("{:<24}", "KRC 1 chemin/px");
+    let mut line = format!("{:<24}", "KRC 1 path/px");
     for t in 0..300 {
         let f = k.frame_tri(&scene, &scene, t);
         if [0, 9, 49, 299].contains(&t) {
@@ -1203,8 +1203,8 @@ pub fn sharc_check(gpu: &Gpu, setup: &TriSetup) {
     println!("{line}");
 }
 
-/// `krc passes [sponzacam|sponza|cornellcam] [ppp]` : temps GPU moyen par passe (frames 0–119,
-/// sans relecture d'image), KRC puis SHaRC officiel, et nombre de cellules vivantes.
+/// `krc passes [sponzacam|sponza|cornellcam] [ppp]`: mean GPU time per pass (frames 0–119,
+/// without image readback), KRC then official SHaRC, and number of live cells.
 pub fn passes(gpu: &Gpu, setup: &TriSetup, ppp: f32) {
     use crate::gpu_krc::{GpuKrc, Method};
     use crate::grid::Grid;
@@ -1215,7 +1215,7 @@ pub fn passes(gpu: &Gpu, setup: &TriSetup, ppp: f32) {
         let mut k = GpuKrc::with_method(gpu, setup.view, grid, Some(&at(0)), method, 3);
         k.ppp = ppp;
         k.readback = false;
-        // réglages KRC optionnels : KRC_RS=1 (rééchantillonnage), KRC_CELL=8, KRC_SEED=1
+        // optional KRC settings: KRC_RS=1 (resampling), KRC_CELL=8, KRC_SEED=1
         let env = |v: &str| std::env::var(v).ok();
         k.resample = env("KRC_RS").is_some();
         k.seed_levels = env("KRC_SEED").is_some();
@@ -1259,10 +1259,10 @@ pub fn passes(gpu: &Gpu, setup: &TriSetup, ppp: f32) {
             }
         }
         sum.sort_by(|a, b| b.1.total_cmp(&a.1));
-        println!("{method:?} : {total:.2} ms/frame en moyenne, cellules vivantes max {live}");
+        println!("{method:?}: {total:.2} ms/frame on average, max live cells {live}");
         if method == Method::Krc {
             println!(
-                "    {:.2} segments par chemin ordinaire, {:.0} % arrêtés sur le cache",
+                "    {:.2} segments per ordinary path, {:.0} % stopped on the cache",
                 segs as f64 / paths.max(1) as f64,
                 100.0 * hits as f64 / paths.max(1) as f64
             );
@@ -1273,7 +1273,7 @@ pub fn passes(gpu: &Gpu, setup: &TriSetup, ppp: f32) {
         let mut wp = worst.2.clone();
         wp.sort_by(|a, b| b.1.total_cmp(&a.1));
         println!(
-            "    frame la plus lente : f{} {:.2} ms — {}",
+            "    slowest frame: f{} {:.2} ms — {}",
             worst.1,
             worst.0,
             wp.iter().take(5).map(|(n, m)| format!("{n} {m:.2}")).collect::<Vec<_>>().join(", ")
@@ -1281,7 +1281,7 @@ pub fn passes(gpu: &Gpu, setup: &TriSetup, ppp: f32) {
     }
 }
 
-/// Une configuration du duel KRC / SHaRC.
+/// A configuration of the KRC / SHaRC duel.
 #[derive(Clone, Copy)]
 pub struct DuelCfg {
     pub name: &'static str,
@@ -1296,13 +1296,13 @@ pub struct DuelCfg {
     pub tau: f32,
     pub multi: bool,
     pub sh: crate::gpu_krc::ShParams,
-    /// réglages des correctifs (voir GpuKrc) : chemins corrélés de lampe, remboursement,
-    /// remise à zéro, bornage du débruiteur
+    /// settings of the fixes (see GpuKrc): lamp correlated paths, payback,
+    /// reset, denoiser clamp
     pub m_light: u32,
     pub debt_rate: f32,
     pub reset_ratio: f32,
     pub dn_gamma: f32,
-    /// chemins corrélés arrêtés sur le cache
+    /// correlated paths stopped on the cache
     pub drs: bool,
 }
 
@@ -1330,8 +1330,8 @@ impl Default for DuelCfg {
     }
 }
 
-/// `krc duel [sponzacam|sponza|cornellcam|cornell]` : test court, 1 graine, 120 frames.
-/// Passage 1 : erreur (relue) ; passage 2 : temps GPU sans relecture. Une ligne par configuration.
+/// `krc duel [sponzacam|sponza|cornellcam|cornell]`: short test, 1 seed, 120 frames.
+/// Pass 1: error (read back); pass 2: GPU time without readback. One line per configuration.
 pub fn duel(gpu: &Gpu, setup: &TriSetup, cfgs: &[DuelCfg]) {
     use crate::gpu_krc::GpuKrc;
     use crate::grid::Grid;
@@ -1341,7 +1341,7 @@ pub fn duel(gpu: &Gpu, setup: &TriSetup, cfgs: &[DuelCfg]) {
     let grid = Grid::fit(&at(0).bounds);
     let dir = format!("results/ref_{}", setup.name);
     let refs: Vec<Vec<V3>> = (0..FRAMES)
-        .map(|f| load_raw(&format!("{dir}/{}.bin", setup.ref_key(f)), setup.view.len()).expect("références manquantes"))
+        .map(|f| load_raw(&format!("{dir}/{}.bin", setup.ref_key(f)), setup.view.len()).expect("missing references"))
         .collect();
     let mut out = String::new();
     let seeds: u32 = std::env::var("KRC_DUEL_SEEDS").ok().and_then(|s| s.parse().ok()).unwrap_or(3);
@@ -1389,7 +1389,7 @@ pub fn duel(gpu: &Gpu, setup: &TriSetup, cfgs: &[DuelCfg]) {
         ms.sort_by(|a, b| a.total_cmp(b));
         let mean = ms.iter().sum::<f64>() / ms.len() as f64;
         let line = format!(
-            "{:<28} relMSE* {all:.3e} (statique {stat:.2e}, dynamique {dynm:.2e}) lum min {lum_min:.2} | GPU moy {mean:.2} ms, p95 {:.2} ms",
+            "{:<28} relMSE* {all:.3e} (static {stat:.2e}, dynamic {dynm:.2e}) lum min {lum_min:.2} | GPU mean {mean:.2} ms, p95 {:.2} ms",
             c.name,
             ms[ms.len() * 95 / 100]
         );
@@ -1403,8 +1403,8 @@ pub fn duel(gpu: &Gpu, setup: &TriSetup, cfgs: &[DuelCfg]) {
     std::fs::write(path, prev + &out).unwrap();
 }
 
-/// `krc statique [sponza|cornell]` : convergence en scène statique, caméra fixe, 300 frames.
-/// Erreur aux frames 9, 29, 99, 299 et temps GPU moyen (sans relecture, second passage).
+/// `krc static [sponza|cornell]`: convergence in a static scene, fixed camera, 300 frames.
+/// Error at frames 9, 29, 99, 299 and mean GPU time (without readback, second pass).
 pub fn static_conv(gpu: &Gpu, setup: &TriSetup, cfgs: &[DuelCfg]) {
     use crate::gpu_krc::GpuKrc;
     use crate::grid::Grid;
@@ -1413,7 +1413,7 @@ pub fn static_conv(gpu: &Gpu, setup: &TriSetup, cfgs: &[DuelCfg]) {
     let scene = at(39);
     let grid = Grid::fit(&scene.bounds);
     let r =
-        load_raw(&format!("results/ref_{}/{}.bin", setup.name, setup.ref_key(39)), view.len()).expect("références manquantes");
+        load_raw(&format!("results/ref_{}/{}.bin", setup.name, setup.ref_key(39)), view.len()).expect("missing references");
     let mut out = String::new();
     for c in cfgs {
         let mut k = GpuKrc::with_method(gpu, view, grid, Some(&scene), c.method, 5);
@@ -1446,15 +1446,15 @@ pub fn static_conv(gpu: &Gpu, setup: &TriSetup, cfgs: &[DuelCfg]) {
         out += "\n";
     }
     std::fs::create_dir_all("results/duel").unwrap();
-    let path = format!("results/duel/statique_{}.txt", setup.name);
+    let path = format!("results/duel/static_{}.txt", setup.name);
     let prev = std::fs::read_to_string(&path).unwrap_or_default();
     std::fs::write(path, prev + &out).unwrap();
 }
 
-/// `krc jeu [scène]` : pipeline comme en jeu (image finale par pixel + débruiteur commun),
-/// 3 graines. Erreur de l'image finale, scintillement (frames 31–39, différence relative
-/// d'une frame à l'autre dans la phase statique), luminance après l'extinction de la grande
-/// lampe (retard), temps GPU complet (débruiteur compris).
+/// `krc game [scene]`: game-like pipeline (per-pixel final image + shared denoiser),
+/// 3 seeds. Error of the final image, flicker (frames 31–39, relative difference
+/// from one frame to the next in the static phase), luminance after the large
+/// lamp switches off (lag), full GPU time (denoiser included).
 pub fn game_eval(gpu: &Gpu, setup: &TriSetup, cfgs: &[(DuelCfg, bool)]) {
     use crate::gpu_krc::GpuKrc;
     use crate::grid::Grid;
@@ -1464,10 +1464,10 @@ pub fn game_eval(gpu: &Gpu, setup: &TriSetup, cfgs: &[(DuelCfg, bool)]) {
     let grid = Grid::fit(&at(0).bounds);
     let dir = format!("results/ref_{}", setup.name);
     let refs: Vec<Vec<V3>> = (0..FRAMES)
-        .map(|f| load_raw(&format!("{dir}/{}.bin", setup.ref_key(f)), setup.view.len()).expect("références manquantes"))
+        .map(|f| load_raw(&format!("{dir}/{}.bin", setup.ref_key(f)), setup.view.len()).expect("missing references"))
         .collect();
     let seeds: u32 = std::env::var("KRC_DUEL_SEEDS").ok().and_then(|s| s.parse().ok()).unwrap_or(3);
-    let out_dir = format!("results/jeu/{}", setup.name);
+    let out_dir = format!("results/game/{}", setup.name);
     std::fs::create_dir_all(&out_dir).unwrap();
     let mut out = String::new();
     for (c, denoise) in cfgs {
@@ -1539,7 +1539,7 @@ pub fn game_eval(gpu: &Gpu, setup: &TriSetup, cfgs: &[(DuelCfg, bool)]) {
         let mean = ms.iter().sum::<f64>() / ms.len() as f64;
         let name = format!("{}{}", c.name, if *denoise { "" } else { " (brut)" });
         let line = format!(
-            "{name:<30} relMSE* {all:.3e} (statique {stat:.2e}, dynamique {dynm:.2e}) | scintillement {flick:.3} | lum f101 {:.2} f103 {:.2} f105 {:.2} f110 {:.2} | GPU moy {mean:.2} ms, p95 {:.2} ms",
+            "{name:<30} relMSE* {all:.3e} (static {stat:.2e}, dynamic {dynm:.2e}) | flicker {flick:.3} | lum f101 {:.2} f103 {:.2} f105 {:.2} f110 {:.2} | GPU mean {mean:.2} ms, p95 {:.2} ms",
             lum[0],
             lum[1],
             lum[2],
@@ -1555,18 +1555,18 @@ pub fn game_eval(gpu: &Gpu, setup: &TriSetup, cfgs: &[(DuelCfg, bool)]) {
     std::fs::write(path, prev + &out).unwrap();
 }
 
-/// Sponza de la vitrine : vraies textures de couleur (512², mipmaps), matériaux PBR choisis à la
-/// main (le glTF n'a pas de noms) : sol de pierre polie presque miroir, pierre satinée, tissus
-/// mats, métal (chaîne, suspensions), poteaux chromés ; feuillages en masque alpha.
+/// Showcase Sponza: real colour textures (512², mipmaps), PBR materials chosen by
+/// hand (the glTF has no names): almost-mirror polished stone floor, satin stone, matte
+/// fabrics, metal (chain, hangers), chrome posts; alpha-masked foliage.
 pub fn sponza_pbr() -> &'static (Vec<Mesh>, Aabb, TexArray) {
     static CELL: std::sync::OnceLock<(Vec<Mesh>, Aabb, TexArray)> = std::sync::OnceLock::new();
     CELL.get_or_init(|| {
         let dir = "assets/sponza";
-        let gltf = gltf::Gltf::open(format!("{dir}/Sponza.gltf")).expect("assets/sponza : lancer tools/fetch_sponza.sh");
+        let gltf = gltf::Gltf::open(format!("{dir}/Sponza.gltf")).expect("assets/sponza: run tools/fetch_sponza.sh");
         let bin = std::fs::read(format!("{dir}/Sponza.bin")).expect("Sponza.bin");
         let scale = 0.008f32;
         const SIZE: u32 = 512;
-        // une couche de texture par matériau (texture de couleur)
+        // one texture layer per material (colour texture)
         let mut layers: Vec<image::RgbaImage> = Vec::new();
         let mut layer_of = vec![-1i32; gltf.materials().len()];
         for mat in gltf.materials() {
@@ -1604,7 +1604,7 @@ pub fn sponza_pbr() -> &'static (Vec<Mesh>, Aabb, TexArray) {
                 let mat = prim.material();
                 let mi = mat.index().unwrap_or(0);
                 let c = mat.pbr_metallic_roughness().base_color_factor();
-                // sol : faces tournées vers le haut au niveau du sol
+                // floor: upward faces at floor level
                 let (mut up, mut area) = (0.0f32, 0.0f32);
                 for t in idx.chunks(3) {
                     let (p0, p1, p2) = (pos[t[0] as usize], pos[t[1] as usize], pos[t[2] as usize]);
@@ -1621,9 +1621,9 @@ pub fn sponza_pbr() -> &'static (Vec<Mesh>, Aabb, TexArray) {
                 let (rough, metal) = match mi {
                     _ if floor => (0.06, 0.0),
                     14..=19 | 0 | 3 | 24 => (1.0, 0.0), // tissus, feuillages, tuiles : mats
-                    20 | 21 => (0.3, 1.0),              // chaîne, suspensions : métal
+                    20 | 21 => (0.3, 1.0),              // chain, hangers: metal
                     2 => (0.15, 1.0),                   // poteaux : chrome
-                    _ => (0.4, 0.0),                    // pierre satinée
+                    _ => (0.4, 0.0),                    // satin stone
                 };
                 let alpha_mask = matches!(mat.alpha_mode(), gltf::material::AlphaMode::Mask);
                 for p in &pos {
@@ -1643,10 +1643,10 @@ pub fn sponza_pbr() -> &'static (Vec<Mesh>, Aabb, TexArray) {
     })
 }
 
-/// Vitrine : Sponza texturée (matériaux PBR), sphère chromée qui roule au sol (instance 1),
-/// sphère dorée fixe, panneau de ciel au-dessus du toit (lampe 0 : il « se couche » à la frame
-/// 100), lampe chaude de la galerie (lampe 1 : s'allume à la frame 80), deux lanternes chaudes.
-pub fn vitrine(step: u32, sky_on: bool, l2_on: bool) -> TriScene {
+/// Showcase: textured Sponza (PBR materials), a chrome sphere rolling on the floor (instance 1),
+/// a fixed golden sphere, a sky panel above the roof (lamp 0: it "sets" at frame
+/// 100), the gallery's warm lamp (lamp 1: switches on at frame 80), two warm lanterns.
+pub fn showcase(step: u32, sky_on: bool, l2_on: bool) -> TriScene {
     let (meshes0, bounds, tex) = sponza_pbr();
     let mut meshes = meshes0.clone();
     let mut instances: Vec<Instance> = (0..meshes.len()).map(|m| Instance { mesh: m, offset: V3::default() }).collect();
@@ -1664,13 +1664,13 @@ pub fn vitrine(step: u32, sky_on: bool, l2_on: bool) -> TriScene {
     TriScene { meshes, instances, lights, bounds: *bounds, tex: Some(tex) }
 }
 
-pub fn vitrine_at(frame: u32) -> TriScene {
+pub fn showcase_at(frame: u32) -> TriScene {
     let s = crate::scene::state_at(frame);
-    vitrine(s.box_step, s.l0_on, s.l2_on)
+    showcase(s.box_step, s.l0_on, s.l2_on)
 }
 
-/// Vitrine : on marche dans l'atrium en regardant un peu vers le sol (reflets).
-pub fn vitrine_setup(w: usize, h: usize) -> TriSetup {
+/// Showcase: walking through the atrium looking slightly toward the floor (reflections).
+pub fn showcase_setup(w: usize, h: usize) -> TriSetup {
     fn cam(t: u32) -> (V3, V3) {
         let u = t as f64 / 119.0;
         let tau = 2.0 * std::f64::consts::PI;
@@ -1682,16 +1682,16 @@ pub fn vitrine_setup(w: usize, h: usize) -> TriSetup {
     let mut view = sponza_setup(w, h).view;
     view.tv = tv;
     view.th = tv * w as f64 / h as f64;
-    TriSetup { name: format!("vitrine_{w}x{h}"), view, at: vitrine_at, ref_spp: 8192, cam: Some(cam) }
+    TriSetup { name: format!("showcase_{w}x{h}"), view, at: showcase_at, ref_spp: 8192, cam: Some(cam) }
 }
 
-/// PSNR (dB) entre deux images 8 bits.
+/// PSNR (dB) between two 8-bit images.
 pub fn psnr(a: &[u8], b: &[u8]) -> f64 {
     let mse = a.iter().zip(b).map(|(x, y)| (*x as f64 - *y as f64).powi(2)).sum::<f64>() / a.len() as f64;
     10.0 * (255.0 * 255.0 / mse.max(1e-12)).log10()
 }
 
-/// Tone mapping filmique (ACES, approximation de Narkowicz) puis sRGB 8 bits.
+/// Filmic tone mapping (ACES, Narkowicz approximation) then 8-bit sRGB.
 pub fn tonemap(img: &[V3], exposure: f64) -> Vec<u8> {
     let aces = |x: f64| {
         let x = x * exposure;
@@ -1704,27 +1704,27 @@ pub fn tonemap(img: &[V3], exposure: f64) -> Vec<u8> {
     img.iter().flat_map(|v| [srgb(aces(v.x)), srgb(aces(v.y)), srgb(aces(v.z))]).collect()
 }
 
-/// `krc vitrinetest [w]` : une image de référence et une image de chaque méthode (mode jeu,
-/// frame 30) pour vérifier l'allure de la vitrine.
-pub fn vitrine_test(gpu: &Gpu, w: usize) {
+/// `krc showcasetest [w]`: one reference image and one image of each method (game mode,
+/// frame 30) to check the showcase's look.
+pub fn showcase_test(gpu: &Gpu, w: usize) {
     use crate::gpu_krc::{GpuKrc, Method};
     use crate::grid::Grid;
-    let setup = vitrine_setup(w, w * 9 / 16);
+    let setup = showcase_setup(w, w * 9 / 16);
     let (view, at) = (setup.view, setup.at);
     let scene0 = at(0);
-    eprintln!("vitrine : {} triangles, boîte {:?} → {:?}", scene0.triangles(), scene0.bounds.min, scene0.bounds.max);
+    eprintln!("showcase: {} triangles, box {:?} → {:?}", scene0.triangles(), scene0.bounds.min, scene0.bounds.max);
     let grid = Grid::fit(&scene0.bounds);
-    std::fs::create_dir_all("results/vitrine").unwrap();
+    std::fs::create_dir_all("results/showcase").unwrap();
     let mut rk = GpuKrc::with(gpu, view, grid, Some(&scene0), false, 0);
     rk.set_view(setup.view_at(30));
     let t = std::time::Instant::now();
     let (r, kinds) = rk.reference_tri(&at(30), 512);
-    eprintln!("référence 512 spp : {:.1} s", t.elapsed().as_secs_f64());
+    eprintln!("reference 512 spp: {:.1} s", t.elapsed().as_secs_f64());
     let mean = r.iter().zip(&kinds).filter(|(_, k)| **k == 2).map(|(v, _)| v.lum()).sum::<f64>()
         / kinds.iter().filter(|k| **k == 2).count().max(1) as f64;
     let exposure = 0.25 / mean.max(1e-6);
-    eprintln!("luminance moyenne {mean:.4}, exposition {exposure:.2}");
-    crate::image::write_png("results/vitrine/test_reference.png", view.w, view.h, &tonemap(&r, exposure)).unwrap();
+    eprintln!("mean luminance {mean:.4}, exposure {exposure:.2}");
+    crate::image::write_png("results/showcase/test_reference.png", view.w, view.h, &tonemap(&r, exposure)).unwrap();
     for (name, method) in [("krc", Method::Krc), ("sharc", Method::Sharc)] {
         let mut k = GpuKrc::with_method(gpu, view, grid, Some(&scene0), method, 1);
         k.game = true;
@@ -1741,16 +1741,16 @@ pub fn vitrine_test(gpu: &Gpu, w: usize) {
                 eprintln!("{name} : {:.2} ms", fr.passes.iter().map(|p| p.1).sum::<f64>());
             }
         }
-        crate::image::write_png(&format!("results/vitrine/test_{name}.png"), view.w, view.h, &tonemap(&last, exposure)).unwrap();
+        crate::image::write_png(&format!("results/showcase/test_{name}.png"), view.w, view.h, &tonemap(&last, exposure)).unwrap();
     }
 }
 
-/// `krc vitrinems [w]` : temps GPU moyen (frames 10–40, sans relecture) de quelques réglages du
-/// mode jeu sur la vitrine, pour choisir des configurations à temps égal.
-pub fn vitrine_ms(gpu: &Gpu, w: usize) {
+/// `krc showcasems [w]`: mean GPU time (frames 10–40, without readback) of a few game-mode
+/// settings on the showcase, to choose configurations at equal time.
+pub fn showcase_ms(gpu: &Gpu, w: usize) {
     use crate::gpu_krc::{GpuKrc, Method, ShParams};
     use crate::grid::Grid;
-    let setup = vitrine_setup(w, w * 9 / 16);
+    let setup = showcase_setup(w, w * 9 / 16);
     let at = setup.at;
     let scene0 = at(0);
     let grid = Grid::fit(&scene0.bounds);
@@ -1775,7 +1775,7 @@ pub fn vitrine_ms(gpu: &Gpu, w: usize) {
         k.ppp = ppp;
         k.sh = sh;
         k.krc_spp = sh.render_spp;
-        k.off = std::env::var("KRC_OFF").ok().and_then(|c| c.parse().ok()).unwrap_or(0); // pour KRC, render_spp sert de nombre d'estimations par pixel
+        k.off = std::env::var("KRC_OFF").ok().and_then(|c| c.parse().ok()).unwrap_or(0); // for KRC, render_spp is the number of estimates per pixel
         k.readback = false;
         let mut prev = at(0);
         let mut ms = 0.0;
@@ -1792,27 +1792,27 @@ pub fn vitrine_ms(gpu: &Gpu, w: usize) {
     }
 }
 
-/// `krc vitrine [w]` : vidéo comparative KRC | SHaRC (NVIDIA) | référence sur la vitrine, même
-/// pipeline de jeu (direct par pixel, reflets, débruiteur commun), à temps GPU égal.
-/// Sorties : results/vitrine/{krc,sharc,reference}/fNNN.png, comparaison.mp4 (24 i/s),
-/// comparaison_lente.mp4 (12 i/s), images fixes aux moments clés, mesures.txt.
-pub fn vitrine_video(gpu: &Gpu, w: usize) {
+/// `krc showcase [w]`: comparison video KRC | SHaRC (NVIDIA) | reference on the showcase, same
+/// game pipeline (per-pixel direct, reflections, shared denoiser), at equal GPU time.
+/// Outputs: results/showcase/{krc,sharc,reference}/fNNN.png, comparison.mp4 (24 fps),
+/// comparison_slow.mp4 (12 fps), stills at key moments, measurements.txt.
+pub fn showcase_video(gpu: &Gpu, w: usize) {
     use crate::gpu_krc::{GpuKrc, Method, ShParams};
     use crate::grid::Grid;
     use crate::render::{load_raw, save_raw};
     use crate::scene::FRAMES;
     let h = w * 9 / 16;
-    let setup = vitrine_setup(w, h);
+    let setup = showcase_setup(w, h);
     let (view, at) = (setup.view, setup.at);
     let scene0 = at(0);
     let grid = Grid::fit(&scene0.bounds);
     let ref_spp: u32 = std::env::var("KRC_REF_SPP").ok().and_then(|s| s.parse().ok()).unwrap_or(2048);
-    let out = "results/vitrine";
+    let out = "results/showcase";
     let refdir = format!("results/ref_{}_{}", setup.name, ref_spp);
     for d in [format!("{out}/krc"), format!("{out}/sharc"), format!("{out}/reference"), refdir.clone()] {
         std::fs::create_dir_all(d).unwrap();
     }
-    // références (une par frame, gardées sur disque)
+    // references (one per frame, kept on disk)
     let mut rk = GpuKrc::with(gpu, view, grid, Some(&scene0), false, 0);
     let mut refs = Vec::new();
     for f in 0..FRAMES {
@@ -1822,7 +1822,7 @@ pub fn vitrine_video(gpu: &Gpu, w: usize) {
             rk.set_view(setup.view_at(f));
             let (img, _) = rk.reference_tri(&at(f), ref_spp);
             save_raw(&path, &img);
-            eprintln!("référence f{f:03} : {:.1} s", t.elapsed().as_secs_f64());
+            eprintln!("reference f{f:03}: {:.1} s", t.elapsed().as_secs_f64());
             img
         });
         refs.push(img);
@@ -1854,8 +1854,8 @@ pub fn vitrine_video(gpu: &Gpu, w: usize) {
     let mut report = String::new();
     let mut labels = Vec::new();
     for (dir, label, method, ppp, sh) in methods {
-        // temps GPU : passage séparé, sans relecture ni écriture d'images (sinon le GPU attend le
-        // CPU et ralentit)
+        // GPU time: a separate pass, without image readback or writing (otherwise the GPU waits for the
+        // CPU and slows down)
         let mut k = GpuKrc::with_method(gpu, view, grid, Some(&scene0), method, 1);
         k.game = true;
         k.ppp = ppp;
@@ -1863,8 +1863,8 @@ pub fn vitrine_video(gpu: &Gpu, w: usize) {
         k.krc_spp = sh.render_spp;
         k.off = std::env::var("KRC_OFF").ok().and_then(|c| c.parse().ok()).unwrap_or(0);
         if method == Method::Krc {
-            // cellules de 16 px : moins de taches basse fréquence (bruit propre à chaque cellule) que
-            // 8 px dans cette scène texturée, et moins chères ; balayage 6/8/12/16 px dans RESULTATS §17
+            // 16 px cells: fewer low-frequency blotches (noise specific to each cell) than
+            // 8 px in this textured scene, and cheaper; sweep 6/8/12/16 px in RESULTS §17
             k.cell_px = std::env::var("KRC_CELL").ok().and_then(|c| c.parse().ok()).unwrap_or(16.0);
         }
         k.m_light = std::env::var("KRC_ML").ok().and_then(|s| s.parse().ok()).unwrap_or(16);
@@ -1888,8 +1888,8 @@ pub fn vitrine_video(gpu: &Gpu, w: usize) {
         k.krc_spp = sh.render_spp;
         k.off = std::env::var("KRC_OFF").ok().and_then(|c| c.parse().ok()).unwrap_or(0);
         if method == Method::Krc {
-            // cellules de 16 px : moins de taches basse fréquence (bruit propre à chaque cellule) que
-            // 8 px dans cette scène texturée, et moins chères ; balayage 6/8/12/16 px dans RESULTATS §17
+            // 16 px cells: fewer low-frequency blotches (noise specific to each cell) than
+            // 8 px in this textured scene, and cheaper; sweep 6/8/12/16 px in RESULTS §17
             k.cell_px = std::env::var("KRC_CELL").ok().and_then(|c| c.parse().ok()).unwrap_or(16.0);
         }
         k.m_light = std::env::var("KRC_ML").ok().and_then(|s| s.parse().ok()).unwrap_or(16);
@@ -1902,26 +1902,26 @@ pub fn vitrine_video(gpu: &Gpu, w: usize) {
             prev = scene;
             let (_, e, lr) = frame_err(&fr.image, &fr.kinds, &refs[f as usize]);
             err += e / FRAMES as f64;
-            // erreur « à l'œil » : PSNR des images affichées (après tone mapping, 8 bits) ; le relMSE*
-            // pénalise très fort un pixel clair sur un fond sombre de la référence (bord d'un reflet
-            // du ciel), beaucoup moins un reflet manquant
+            // error "to the eye": PSNR of the displayed images (after tone mapping, 8 bits); relMSE*
+            // penalises a bright pixel on a dark background of the reference very heavily (edge of a sky
+            // reflection), a missing reflection much less
             let img = tonemap(&fr.image, exposure);
             let p = psnr(&img, &ref_png[f as usize]);
             psnr_m += p / FRAMES as f64;
             if [39u32, 60, 81, 101, 110, 119].contains(&f) {
-                report += &format!("{label} f{f:03} : relMSE* {e:.3e}, lum {lr:.2}, PSNR affiché {p:.2} dB\n");
+                report += &format!("{label} f{f:03}: relMSE* {e:.3e}, lum {lr:.2}, displayed PSNR {p:.2} dB\n");
             }
             crate::image::write_png(&format!("{out}/{dir}/f{f:03}.png"), w, h, &img).unwrap();
         }
         report += &format!(
-            "{label} : relMSE* moyenne {err:.3e}, PSNR affiché moyen {psnr_m:.2} dB, GPU moyen {mean_ms:.2} ms, p95 {p95:.2} ms\n"
+            "{label}: mean relMSE* {err:.3e}, mean displayed PSNR {psnr_m:.2} dB, mean GPU {mean_ms:.2} ms, p95 {p95:.2} ms\n"
         );
-        labels.push(format!("{label} - {mean_ms:.1} ms par frame"));
+        labels.push(format!("{label} - {mean_ms:.1} ms per frame"));
         eprintln!("{label} : relMSE* {err:.3e}, {mean_ms:.2} ms");
     }
-    labels.push(format!("Reference - {ref_spp} chemins par pixel"));
-    std::fs::write(format!("{out}/mesures.txt"), &report).unwrap();
-    // vidéo côte à côte, étiquetée
+    labels.push(format!("Reference - {ref_spp} paths per pixel"));
+    std::fs::write(format!("{out}/measurements.txt"), &report).unwrap();
+    // side-by-side video, labelled
     let font = "C\\:/Windows/Fonts/arial.ttf";
     let lab = |i: usize| {
         format!(
@@ -1931,7 +1931,7 @@ pub fn vitrine_video(gpu: &Gpu, w: usize) {
         )
     };
     let filter = format!("[0:v]{}[a];[1:v]{}[b];[2:v]{}[c];[a][b][c]hstack=inputs=3,format=yuv420p[v]", lab(0), lab(1), lab(2));
-    for (fps, name) in [(24, "comparaison.mp4"), (12, "comparaison_lente.mp4")] {
+    for (fps, name) in [(24, "comparison.mp4"), (12, "comparison_slow.mp4")] {
         let mut cmd = std::process::Command::new("ffmpeg");
         cmd.args(["-y", "-loglevel", "error"]);
         for dir in ["krc", "sharc", "reference"] {
@@ -1942,7 +1942,7 @@ pub fn vitrine_video(gpu: &Gpu, w: usize) {
         let st = cmd.status().expect("ffmpeg");
         eprintln!("{name} : {st}");
     }
-    // images fixes : statique, sphère qui roule, galerie allumée, ciel couché
+    // stills: static, rolling sphere, gallery lit, sky set
     for f in [39u32, 60, 90, 110] {
         let mut cmd = std::process::Command::new("ffmpeg");
         cmd.args(["-y", "-loglevel", "error"]);
@@ -1951,28 +1951,28 @@ pub fn vitrine_video(gpu: &Gpu, w: usize) {
         }
         let still = format!("[0:v]{}[a];[1:v]{}[b];[2:v]{}[c];[a][b][c]hstack=inputs=3[v]", lab(0), lab(1), lab(2));
         cmd.args(["-filter_complex", &still, "-map", "[v]", "-frames:v", "1"]);
-        cmd.arg(format!("{out}/comparaison_f{f:03}.png"));
+        cmd.arg(format!("{out}/comparison_f{f:03}.png"));
         cmd.status().expect("ffmpeg");
     }
 }
 
-/// `krc vitrineref f [spp]` : référence d'une frame de la vitrine (contrôle).
-pub fn vitrine_ref(gpu: &Gpu, f: u32, spp: u32) {
+/// `krc showcaseref f [spp]`: reference of one showcase frame (check).
+pub fn showcase_ref(gpu: &Gpu, f: u32, spp: u32) {
     use crate::gpu_krc::GpuKrc;
     use crate::grid::Grid;
-    let setup = vitrine_setup(960, 540);
+    let setup = showcase_setup(960, 540);
     let scene0 = (setup.at)(0);
     let mut rk = GpuKrc::with(gpu, setup.view, Grid::fit(&scene0.bounds), Some(&scene0), false, 0);
     rk.set_view(setup.view_at(f));
     let (img, _) = rk.reference_tri(&(setup.at)(f), spp);
-    crate::image::write_png(&format!("results/vitrine/test_ref_f{f:03}.png"), 960, 540, &tonemap(&img, 9.3)).unwrap();
-    // référence construite directement avec la scène de la frame f
+    crate::image::write_png(&format!("results/showcase/test_ref_f{f:03}.png"), 960, 540, &tonemap(&img, 9.3)).unwrap();
+    // reference built directly with frame f's scene
     let scf = (setup.at)(f);
     let mut rk2 = GpuKrc::with(gpu, setup.view, Grid::fit(&scene0.bounds), Some(&scf), false, 0);
     rk2.set_view(setup.view_at(f));
     let (img3, _) = rk2.reference_tri(&scf, spp);
-    crate::image::write_png(&format!("results/vitrine/test_ref_direct_f{f:03}.png"), 960, 540, &tonemap(&img3, 9.3)).unwrap();
-    // même frame, KRC à froid (une seule frame, sans séquence)
+    crate::image::write_png(&format!("results/showcase/test_ref_direct_f{f:03}.png"), 960, 540, &tonemap(&img3, 9.3)).unwrap();
+    // same frame, KRC from cold (a single frame, without a sequence)
     let mut k = GpuKrc::with(gpu, setup.view, Grid::fit(&scene0.bounds), Some(&scene0), false, 1);
     k.set_view(setup.view_at(f));
     let sc = (setup.at)(f);
@@ -1980,15 +1980,15 @@ pub fn vitrine_ref(gpu: &Gpu, f: u32, spp: u32) {
     for _ in 0..8 {
         img2 = k.frame_tri(&sc, &sc, f).image;
     }
-    crate::image::write_png(&format!("results/vitrine/test_krc_cold_f{f:03}.png"), 960, 540, &tonemap(&img2, 9.3)).unwrap();
+    crate::image::write_png(&format!("results/showcase/test_krc_cold_f{f:03}.png"), 960, 540, &tonemap(&img2, 9.3)).unwrap();
 }
 
-/// `krc vitrinedbg f` : composantes de l'image finale KRC à la frame f (séquence jouée depuis 0) :
-/// indirect des cellules seul, direct + reflet seuls, image complète ; avec et sans débruiteur.
-pub fn vitrine_dbg(gpu: &Gpu, f: u32) {
+/// `krc showcasedbg f`: components of KRC's final image at frame f (sequence played from 0):
+/// cells' indirect alone, direct + reflection alone, full image; with and without the denoiser.
+pub fn showcase_dbg(gpu: &Gpu, f: u32) {
     use crate::gpu_krc::{GpuKrc, Method, ShParams};
     use crate::grid::Grid;
-    let setup = vitrine_setup(960, 540);
+    let setup = showcase_setup(960, 540);
     let at = setup.at;
     let scene0 = at(0);
     let grid = Grid::fit(&scene0.bounds);
@@ -2019,19 +2019,19 @@ pub fn vitrine_dbg(gpu: &Gpu, f: u32) {
                 }
             }
             let tag = if denoise { "debruite" } else { "brut" };
-            crate::image::write_png(&format!("results/vitrine/dbg_f{f:03}_{name}_{tag}.png"), 960, 540, &tonemap(&img, 9.3))
+            crate::image::write_png(&format!("results/showcase/dbg_f{f:03}_{name}_{tag}.png"), 960, 540, &tonemap(&img, 9.3))
                 .unwrap();
         }
     }
 }
 
-/// `krc vitrinelum` : part de chaque protection dans l'assombrissement (KRC et SHaRC, mode jeu,
-/// frames 0–45, relMSE* et luminance contre la référence aux frames 30–45).
-pub fn vitrine_lum(gpu: &Gpu) {
+/// `krc showcaselum`: share of each protection in the darkening (KRC and SHaRC, game mode,
+/// frames 0–45, relMSE* and luminance against the reference at frames 30–45).
+pub fn showcase_lum(gpu: &Gpu) {
     use crate::gpu_krc::{GpuKrc, Method, ShParams};
     use crate::grid::Grid;
     use crate::render::load_raw;
-    let setup = vitrine_setup(960, 540);
+    let setup = showcase_setup(960, 540);
     let at = setup.at;
     let scene0 = at(0);
     let grid = Grid::fit(&scene0.bounds);
@@ -2039,21 +2039,21 @@ pub fn vitrine_lum(gpu: &Gpu) {
     let d = ShParams::default();
     let cases: Vec<(&str, Method, u32, bool, f32)> = vec![
         ("krc", Method::Krc, 0, true, 0.0),
-        ("krc sans anti-lucioles", Method::Krc, 1, true, 0.0),
-        ("krc sans moyenne tronquée", Method::Krc, 2, true, 0.0),
-        ("krc sans écrêtage cellules", Method::Krc, 4, true, 0.0),
-        ("krc sans régularisation", Method::Krc, 8, true, 0.0),
-        ("krc sans rien", Method::Krc, 15, true, 0.0),
-        ("krc sans rien, bornage 4", Method::Krc, 15, true, 4.0),
-        ("krc brut (sans débruiteur)", Method::Krc, 15, false, 0.0),
-        ("krc sans temporel", Method::Krc, 15 | 16, true, 0.0),
-        ("krc sans à-trous", Method::Krc, 15 | 32, true, 0.0),
-        ("krc spéculaire brut", Method::Krc, 15 | 64, true, 0.0),
-        ("sharc sans temporel", Method::Sharc, 15 | 16, true, 0.0),
-        ("sharc sans à-trous", Method::Sharc, 15 | 32, true, 0.0),
-        ("sharc spéculaire brut", Method::Sharc, 15 | 64, true, 0.0),
+        ("krc without anti-firefly", Method::Krc, 1, true, 0.0),
+        ("krc without truncated mean", Method::Krc, 2, true, 0.0),
+        ("krc without cell clamping", Method::Krc, 4, true, 0.0),
+        ("krc without regularisation", Method::Krc, 8, true, 0.0),
+        ("krc without anything", Method::Krc, 15, true, 0.0),
+        ("krc without anything, clamp 4", Method::Krc, 15, true, 4.0),
+        ("krc raw (no denoiser)", Method::Krc, 15, false, 0.0),
+        ("krc without temporal", Method::Krc, 15 | 16, true, 0.0),
+        ("krc without a-trous", Method::Krc, 15 | 32, true, 0.0),
+        ("krc raw specular", Method::Krc, 15 | 64, true, 0.0),
+        ("sharc without temporal", Method::Sharc, 15 | 16, true, 0.0),
+        ("sharc without a-trous", Method::Sharc, 15 | 32, true, 0.0),
+        ("sharc raw specular", Method::Sharc, 15 | 64, true, 0.0),
         ("sharc", Method::Sharc, 0, true, 0.0),
-        ("sharc sans rien", Method::Sharc, 15, true, 0.0),
+        ("sharc without anything", Method::Sharc, 15, true, 0.0),
         ("sharc brut", Method::Sharc, 15, false, 0.0),
     ];
     for (name, method, off, denoise, gamma) in cases {
@@ -2078,7 +2078,7 @@ pub fn vitrine_lum(gpu: &Gpu) {
             let f = k.frame_tri(&scene, &prev, t);
             prev = scene;
             if t >= 30 {
-                let r = load_raw(&format!("{refdir}/f{t:03}.bin"), setup.view.len()).expect("référence");
+                let r = load_raw(&format!("{refdir}/f{t:03}.bin"), setup.view.len()).expect("reference");
                 let (_, et, l) = frame_err(&f.image, &f.kinds, &r);
                 e += et;
                 lr += l;
@@ -2089,19 +2089,19 @@ pub fn vitrine_lum(gpu: &Gpu) {
     }
 }
 
-/// `krc vitrineregref f` : luminance d'une référence régularisée contre la référence exacte.
-pub fn vitrine_regref(gpu: &Gpu, f: u32) {
+/// `krc showcaseregref f`: luminance of a regularised reference against the exact reference.
+pub fn showcase_regref(gpu: &Gpu, f: u32) {
     use crate::gpu_krc::GpuKrc;
     use crate::grid::Grid;
     use crate::render::load_raw;
-    let setup = vitrine_setup(960, 540);
+    let setup = showcase_setup(960, 540);
     let scene0 = (setup.at)(0);
     let mut rk = GpuKrc::with(gpu, setup.view, Grid::fit(&scene0.bounds), Some(&scene0), false, 0);
     rk.set_view(setup.view_at(f));
     rk.ref_reg = true;
     let (img, kinds) = rk.reference_tri(&(setup.at)(f), 2048);
-    let r = load_raw(&format!("results/ref_{}_2048/f{f:03}.bin", setup.name), setup.view.len()).expect("référence");
+    let r = load_raw(&format!("results/ref_{}_2048/f{f:03}.bin", setup.name), setup.view.len()).expect("reference");
     let (_, e, lr) = frame_err(&img, &kinds, &r);
-    println!("référence régularisée / exacte, f{f} : lum {lr:.3}, relMSE* {e:.3e}");
-    crate::image::write_png(&format!("results/vitrine/ref_reg_f{f:03}.png"), 960, 540, &tonemap(&img, 9.3)).unwrap();
+    println!("regularised / exact reference, f{f}: lum {lr:.3}, relMSE* {e:.3e}");
+    crate::image::write_png(&format!("results/showcase/ref_reg_f{f:03}.png"), 960, 540, &tonemap(&img, 9.3)).unwrap();
 }

@@ -1,14 +1,14 @@
-//! Grille grossière de régions et ensembles de régions traversées (dépendances spatiales).
+//! Coarse region grid and sets of regions crossed (spatial dependencies).
 use crate::math::{v3, V3};
 use crate::scene::Aabb;
 
-/// 0.6 m avec origine -0.2 : la cloison (x = 5.2) tombe sur une frontière de région.
+/// 0.6 m with origin -0.2: the partition (x = 5.2) falls on a region boundary.
 pub const REGION: f64 = 0.6;
 pub const ORIGIN: V3 = v3(-0.2, -0.2, -0.2);
-pub const DIMS: [i64; 3] = [72, 6, 8]; // jusqu'à 8 pièces
+pub const DIMS: [i64; 3] = [72, 6, 8]; // up to 8 rooms
 pub const WORDS: usize = 54;
 
-/// Ensemble exact de régions (jusqu'à 3456).
+/// Exact set of regions (up to 3456).
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Bits(pub [u64; WORDS]);
 
@@ -32,7 +32,7 @@ impl Bits {
     }
 }
 
-/// Niveau 1 : régions de 1,2 m (2×2×2 régions fines), 36×3×4 = 432 bits.
+/// Level 1: regions of 1.2 m (2×2×2 fine regions), 36×3×4 = 432 bits.
 pub const L1_WORDS: usize = 7;
 
 pub fn l1_of(region: usize) -> usize {
@@ -41,7 +41,7 @@ pub fn l1_of(region: usize) -> usize {
     (((z / 2) * 3 + y / 2) * 36 + x / 2) as usize
 }
 
-/// Ensembles grossiers dérivés d'un ensemble fin : niveau 1 (1,2 m) et super-régions (niveau 2).
+/// Coarse sets derived from a fine set: level 1 (1.2 m) and super-regions (level 2).
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub struct Coarse {
     pub l1: [u64; L1_WORDS],
@@ -77,9 +77,9 @@ impl Coarse {
     }
 }
 
-/// Super-régions pour les fréquences : blocs de 4 × 6 × 4 régions (2,4 m × toute la hauteur ×
-/// 2,4 m). Un hachage sur 256 compteurs a échoué : une cellule traverse 100 à 300 régions par
-/// fenêtre, les collisions rendaient toutes les fréquences élevées.
+/// Super-regions for the frequencies: blocks of 4 × 6 × 4 regions (2.4 m × the full height ×
+/// 2.4 m). A hash over 256 counters failed: a cell crosses 100 to 300 regions per
+/// window, and collisions made every frequency high.
 const SUPER_DIV: [i64; 3] = [4, 6, 4];
 const SUPER_DIMS: [usize; 3] = [18, 1, 2];
 pub const SUPER: usize = SUPER_DIMS[0] * SUPER_DIMS[1] * SUPER_DIMS[2];
@@ -91,8 +91,8 @@ pub fn super_of(region: usize) -> usize {
     (sz * SUPER_DIMS[1] + sy) * SUPER_DIMS[0] + sx
 }
 
-/// Fréquences exactes par super-région : nombre d'échantillons de la fenêtre qui y ont un sommet
-/// (compteurs saturants).
+/// Exact frequencies per super-region: number of the window's samples with a vertex there
+/// (saturating counters).
 #[derive(Clone, Copy)]
 pub struct Freq {
     pub cnt: [u8; SUPER],
@@ -141,7 +141,7 @@ pub fn mark_aabb(bits: &mut Bits, b: &Aabb) {
     }
 }
 
-/// Marque toutes les régions traversées par le segment [a, b] (DDA d'Amanatides–Woo).
+/// Marks every region crossed by segment [a, b] (Amanatides–Woo DDA).
 pub fn mark_segment(bits: &mut Bits, a: V3, b: V3) {
     let d = b - a;
     let (mut t0, mut t1) = (0.0f64, 1.0f64);

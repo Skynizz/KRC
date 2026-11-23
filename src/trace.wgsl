@@ -1,7 +1,7 @@
-// Path tracer diffus avec NEE : portage GPU de pt.rs (même logique, en f32).
-// Une invocation = une requête (un point de surface, une graine) ; `spp` chemins moyennés.
-// Enregistre les dépendances du chemin si flags & 2 : régions traversées (DDA), super-régions
-// des sommets, lampes choisies par NEE, objets touchés.
+// Diffuse path tracer with NEE: GPU port of pt.rs (same logic, in f32).
+// One invocation = one request (a surface point, a seed); `spp` paths averaged.
+// Records the path's dependencies if flags & 2: regions crossed (DDA), super-regions
+// of the vertices, lamps chosen by NEE, objects touched.
 
 const REGION: f32 = 0.6;
 const ORIGIN: vec3<f32> = vec3<f32>(-0.2, -0.2, -0.2);
@@ -14,7 +14,7 @@ const EPS: f32 = 1e-4;
 const OFFSET: f32 = 1e-4;
 const PI: f32 = 3.14159265358979;
 const LIGHT_ID_BASE: u32 = 64u;
-const MASKS: u32 = 8u; // par requête : lampes, objets[4], super-régions[2], libre
+const MASKS: u32 = 8u; // per request: lamps, objects[4], super-regions[2], free
 
 struct Box { mn: vec3<f32>, p0: f32, mx: vec3<f32>, p1: f32, albedo: vec3<f32>, p2: f32 };
 struct Light { center: vec3<f32>, hx: f32, hz: f32, on: f32, power: f32, toggle_w: f32, emission: vec3<f32>, p0: f32 };
@@ -51,7 +51,7 @@ fn rnd() -> f32 {
     return f32(w >> 8u) * (1.0 / 16777216.0);
 }
 
-// ---------------------------------------------------------------- dépendances
+// ---------------------------------------------------------------- dependencies
 fn cell_of(p: vec3<f32>) -> vec3<i32> {
     return clamp(vec3<i32>(floor((p - ORIGIN) / REGION)), vec3<i32>(0), DIMS - vec3<i32>(1));
 }
@@ -77,7 +77,7 @@ fn mark_object(id: u32) {
     m_objs[id >> 5u] = m_objs[id >> 5u] | (1u << (id & 31u));
 }
 
-// DDA d'Amanatides–Woo sur la grille de régions, segment [a, b].
+// Amanatides–Woo DDA on the region grid, segment [a, b].
 fn mark_segment(a: vec3<f32>, b: vec3<f32>) {
     if (!rec_on) { return; }
     let d = b - a;
@@ -125,16 +125,16 @@ fn mark_segment(a: vec3<f32>, b: vec3<f32>) {
     }
 }
 
-// ---------------------------------------------------------------- géométrie
+// ---------------------------------------------------------------- geometry
 struct Hit { found: bool, t: f32, p: vec3<f32>, n: vec3<f32>, albedo: vec3<f32>, id: u32, is_light: bool };
 
-// évite 1/0 : une composante quasi nulle devient ±1e-12 (son signe est conservé)
+// avoids 1/0: an almost zero component becomes ±1e-12 (its sign is kept)
 fn safe_dir(d: vec3<f32>) -> vec3<f32> {
     let s = select(vec3<f32>(1.0), vec3<f32>(-1.0), d < vec3<f32>(0.0));
     return select(d, s * 1e-12, abs(d) < vec3<f32>(1e-12));
 }
 
-// (t0, t1, axe) du test des dalles
+// (t0, t1, axis) of the slab test
 fn slab(mn: vec3<f32>, mx: vec3<f32>, o: vec3<f32>, inv: vec3<f32>) -> vec3<f32> {
     let ta = (mn - o) * inv;
     let tb = (mx - o) * inv;
@@ -192,7 +192,7 @@ fn intersect(o: vec3<f32>, d: vec3<f32>) -> Hit {
     return h;
 }
 
-// Premier objet qui bloque [o, o + d·tmax] : (trouvé, id, t)
+// First object blocking [o, o + d·tmax]: (found, id, t)
 struct Occ { found: bool, id: u32, t: f32 };
 
 fn occluder(o: vec3<f32>, d: vec3<f32>, tmax: f32) -> Occ {
@@ -240,7 +240,7 @@ fn radiance(p0: vec3<f32>, n0: vec3<f32>, a0: vec3<f32>, uni: bool) -> LL {
     mark_vertex(p0);
     for (var depth = 0u; depth < MAX_DEPTH; depth++) {
         let origin = p + n * OFFSET;
-        // NEE (choix de lampe ∝ puissance ; mode union : indépendant de l'état allumé)
+        // NEE (lamp choice ∝ power; union mode: independent of the on state)
         var total = 0.0;
         for (var j = 0u; j < params.n_lights; j++) { total += light_power(j, uni); }
         if (total > 0.0) {

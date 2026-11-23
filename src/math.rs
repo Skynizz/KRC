@@ -97,7 +97,7 @@ pub fn mix64(mut z: u64) -> u64 {
     z ^ (z >> 31)
 }
 
-/// SplitMix64 : rapide, assez bon pour du Monte Carlo de prototype.
+/// SplitMix64: fast, good enough for prototype Monte Carlo.
 pub struct Rng(u64);
 
 impl Rng {

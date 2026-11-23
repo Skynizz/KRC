@@ -4,17 +4,17 @@
 //
 // This software contains source code provided by NVIDIA Corporation.
 // Copyright (c) 2023-2026, NVIDIA CORPORATION. All rights reserved.
-// Distribué sous la NVIDIA RTX SDKs License (third_party/sharc/License.md).
+// Distributed under the NVIDIA RTX SDKs License (third_party/sharc/License.md).
 //
-// Portage fonction par fonction, réglages par défaut du SDK :
-//   HASH_GRID_COMPACT 0 (clés 64 bits, ici deux u32 lo/hi), HASH_GRID_USE_NORMALS 1,
-//   HASH_GRID_LIMIT_EMPTY_SLOTS 2 (valeur fixée par SharcCommon.h), seau de 16,
-//   HASH_GRID_ENABLE_64_BIT_ATOMICS 0 : la variante à tampon de verrous du SDK (WGSL n'a pas
-//   d'atomiques 64 bits), SHARC_UPDATE avec rééchantillonnage du cache (SHARC_PROPAGATION_DEPTH 2),
-//   SHARC_BLEND_ADJACENT_LEVELS 1, SHARC_MATERIAL_DEMODULATION 1 (comme l'exemple Pathtracer),
-//   pas de SH, pas d'éclairage réactif, pas d'émissif séparé, pas d'accélération du fondu.
-// Écarts forcés : float16_t4 → pack2x16float (même stockage 16 bits) ; en cas d'échec du verrou
-// après 8 essais, la valeur d'origine est indéfinie en HLSL, ici une sentinelle (= collision).
+// Function-by-function port, the SDK's default settings:
+//   HASH_GRID_COMPACT 0 (64-bit keys, here two u32 lo/hi), HASH_GRID_USE_NORMALS 1,
+//   HASH_GRID_LIMIT_EMPTY_SLOTS 2 (value set by SharcCommon.h), bucket of 16,
+//   HASH_GRID_ENABLE_64_BIT_ATOMICS 0: the SDK's lock-buffer variant (WGSL has no
+//   64-bit atomics), SHARC_UPDATE with cache resampling (SHARC_PROPAGATION_DEPTH 2),
+//   SHARC_BLEND_ADJACENT_LEVELS 1, SHARC_MATERIAL_DEMODULATION 1 (like the Pathtracer sample),
+//   no SH, no responsive lighting, no separate emissive, no fade acceleration.
+// Forced differences: float16_t4 → pack2x16float (same 16-bit storage); when the lock fails
+// after 8 attempts, the original value is undefined in HLSL, here a sentinel (= collision).
 // ============================================================================================
 
 const HG_POSITION_BIT_NUM: u32 = 17u;
@@ -40,12 +40,12 @@ const SHARC_LINEAR_PROBE_WINDOW_SIZE: u32 = 8u;
 const SHARC_PROPAGATION_DEPTH: u32 = 2u;
 const SHARC_RESAMPLING_DEPTH_MIN: u32 = 1u;
 
-@group(0) @binding(23) var<storage, read_write> sh_keys: array<atomic<u32>>; // 2 mots par entrée (lo, hi)
+@group(0) @binding(23) var<storage, read_write> sh_keys: array<atomic<u32>>; // 2 words per entry (lo, hi)
 @group(0) @binding(24) var<storage, read_write> sh_lock: array<atomic<u32>>;
 @group(0) @binding(25) var<storage, read_write> sh_acc: array<atomic<u32>>;  // SharcAccumulationData : uint4
 @group(0) @binding(26) var<storage, read_write> sh_res: array<vec4<u32>>;    // SharcPackedData : half4, sampleData, ext
 
-// --- clés 64 bits sur deux u32 ---
+// --- 64-bit keys on two u32 ---
 fn hg_put(k: vec2<u32>, v: u32, shift: u32) -> vec2<u32> {
     var r = k;
     if (shift >= 32u) {
@@ -122,10 +122,10 @@ fn hg_load_key(slot: u32) -> vec2<u32> {
     return vec2<u32>(atomicLoad(&sh_keys[2u * slot]), atomicLoad(&sh_keys[2u * slot + 1u]));
 }
 
-// HashGridAtomicCompareExchange, variante !HASH_GRID_ENABLE_64_BIT_ATOMICS (tampon de verrous)
+// HashGridAtomicCompareExchange, !HASH_GRID_ENABLE_64_BIT_ATOMICS variant (lock buffer)
 fn hg_cas(slot: u32, cmp: vec2<u32>, val: vec2<u32>) -> vec2<u32> {
     let lock = 0xaaaaaaaau;
-    var original = vec2<u32>(0xffffffffu); // indéfini en HLSL si le verrou n'est jamais pris
+    var original = vec2<u32>(0xffffffffu); // undefined in HLSL if the lock is never taken
     var fuse = 0u;
     var busy = true;
     while (busy && fuse < 8u) {
@@ -283,7 +283,7 @@ fn sharc_adjacent_key(k: vec2<u32>) -> vec2<u32> {
     return hg_put(r, hg_get(k, HG_NORMAL_BIT_OFFSET, HG_NORMAL_BIT_MASK), HG_NORMAL_BIT_OFFSET);
 }
 
-// SharcResolveEntry : un fil par entrée de la table
+// SharcResolveEntry: one thread per table entry
 @compute @workgroup_size(256)
 fn sharc_resolve(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups) nwg: vec3<u32>) {
     let e = gid.x + gid.y * nwg.x * 256u;
@@ -309,7 +309,7 @@ fn sharc_resolve(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_wor
         sh_res[e].z = resolved.z + (1u | (1u << 16u));
         return;
     }
-    // entrée déjà présente plus loin (collisions lors d'insertions précédentes)
+    // entry already present further on (collisions during earlier insertions)
     if (sample_num_prev == 0.0) {
         let end = min(e + 1u + SHARC_LINEAR_PROBE_WINDOW_SIZE, fr.sh_cap);
         for (var i = e + 1u; i < end; i++) {
@@ -333,7 +333,7 @@ fn sharc_resolve(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_wor
     let inv_total = 1.0 / (sample_num_prev + sample_num);
     rad = rad_prev * (sample_num_prev * inv_total) + rad * (sample_num * inv_total);
     var total = sample_num_prev + sample_num;
-    // SHARC_BLEND_ADJACENT_LEVELS : reprise du niveau voisin quand la caméra bouge
+    // SHARC_BLEND_ADJACENT_LEVELS: reuse of the neighbouring level when the camera moves
     let co = fr.eye - fr.sh_cam_prev;
     if (dot(co, co) > 1e-6 && acc_frames <= 2u) {
         let ak = sharc_adjacent_key(key);
@@ -351,15 +351,15 @@ fn sharc_resolve(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_wor
     for (var w = 0u; w < 4u; w++) { atomicStore(&sh_acc[4u * e + w], 0u); }
 }
 
-// --- intégration (équivalent de Pathtracer.hlsl de l'exemple) ---
+// --- integration (equivalent of the sample's Pathtracer.hlsl) ---
 
-// éclairage direct d'un sommet lambertien (nee_split, krc_gpu.wgsl)
+// direct lighting of a Lambertian vertex (nee_split, krc_gpu.wgsl)
 fn sharc_nee(p: vec3<f32>, n: vec3<f32>, albedo: vec3<f32>) -> vec3<f32> {
     return nee_split(p, n, n, albedo, 1.0, 0.0).d;
 }
 
-// SHARC_MATERIAL_DEMODULATION de l'exemple : max(albédo diffus, 0,05) + max(F0, 0,02) × luminance
-// de l'albédo spéculaire moyen (lambertien pur : max(albédo, 0,05))
+// the sample's SHARC_MATERIAL_DEMODULATION: max(diffuse albedo, 0.05) + max(F0, 0.02) × luminance
+// of the mean specular albedo (pure Lambertian: max(albedo, 0.05))
 fn sharc_demod(albedo: vec3<f32>) -> vec3<f32> { return max(albedo, vec3<f32>(0.05)); }
 fn sharc_demod2(base: vec3<f32>, rough: f32, metal: f32) -> vec3<f32> {
     if (is_diffuse(rough, metal)) { return sharc_demod(base); }
@@ -368,8 +368,8 @@ fn sharc_demod2(base: vec3<f32>, rough: f32, metal: f32) -> vec3<f32> {
     return max(diff_albedo(base, metal), vec3<f32>(0.05)) + max(f0, vec3<f32>(0.02)) * lum(favg);
 }
 
-// Passe Update : un pixel tiré au hasard par bloc sh_down × sh_down, chemin dont chaque segment
-// alimente le cache (débit remis à 1 à chaque rebond, propagation par SharcSetThroughput)
+// Update pass: one pixel drawn at random per sh_down × sh_down block, a path each segment of which
+// feeds the cache (throughput reset to 1 at each bounce, propagation through SharcSetThroughput)
 @compute @workgroup_size(64)
 fn sharc_update(@builtin(global_invocation_id) gid: vec3<u32>) {
     let bw = (fr.w + fr.sh_down - 1u) / fr.sh_down;
@@ -400,7 +400,7 @@ fn sharc_update(@builtin(global_invocation_id) gid: vec3<u32>) {
         var d: vec3<f32>;
         if (is_diffuse(rough, metal)) {
             d = cosine_dir(n);
-            sharc_set_throughput(albedo); // poids BRDF lambertien, échantillonnage en cosinus
+            sharc_set_throughput(albedo); // Lambertian BRDF weight, cosine sampling
         } else {
             let bs = bsdf_sample(n, wo, albedo, rough, metal, false);
             if (!bs.ok) { break; }
@@ -409,7 +409,7 @@ fn sharc_update(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
         let h = intersect(p + n * OFFSET, d);
         if (!h.found || h.light >= 0) {
-            sharc_update_miss(vec3<f32>(0.0)); // ciel noir ; lampes comptées par l'éclairage direct
+            sharc_update_miss(vec3<f32>(0.0)); // black sky; lamps counted by direct lighting
             break;
         }
         p = h.p;
@@ -421,7 +421,7 @@ fn sharc_update(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
 }
 
-// Vue du cache à la caméra (mode debug de l'exemple : SharcGetCachedRadiance au premier impact)
+// Cache view at the camera (the sample's debug mode: SharcGetCachedRadiance at the first hit)
 @compute @workgroup_size(64)
 fn sharc_query(@builtin(global_invocation_id) gid: vec3<u32>) {
     let k = gid.x;
@@ -437,15 +437,15 @@ fn sharc_query(@builtin(global_invocation_id) gid: vec3<u32>) {
     image[k] = vec4<f32>(v, f32(g.kind));
 }
 
-// Passe Render de l'exemple : un chemin par pixel, cache interrogé aux impacts non primaires
-// assez loin (segment > taille de voxel × √3, empreinte du lobe > voxel), puis arrêt
+// The sample's Render pass: one path per pixel, cache queried at non-primary hits
+// far enough (segment > voxel size × √3, lobe footprint > voxel), then stop
 @compute @workgroup_size(64)
 fn sharc_render(@builtin(global_invocation_id) gid: vec3<u32>) {
     let k = gid.x;
     if (k >= fr.w * fr.h) { return; }
     let g = gbuf[k];
     var v = vec3<f32>(0.0);
-    var vs_spec = vec3<f32>(0.0); // mode jeu : partie spéculaire (premier lobe spéculaire)
+    var vs_spec = vec3<f32>(0.0); // game mode: specular part (first specular lobe)
     if (g.kind == 1u) {
         v = g.albedo;
     } else if (g.kind == 2u) {
@@ -507,7 +507,7 @@ fn sharc_render(@builtin(global_invocation_id) gid: vec3<u32>) {
             }
             let h = intersect(p + n * OFFSET, d);
             if (mis && h.found && h.light >= 0) {
-                // lampe touchée par le rayon du BSDF au premier sommet : part BSDF du MIS
+                // lamp hit by the BSDF ray at the first vertex: BSDF part of the MIS
                 mis_mode = 2u;
                 let e = beta * mis_light_hit(u32(h.light), h.t, n, wo, d, albedo, rough, metal);
                 mis_mode = 0u;

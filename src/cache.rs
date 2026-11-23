@@ -1,9 +1,9 @@
-//! Cellules du cache spatial : statistiques, état de vérification, dépendances.
+//! Cells of the spatial cache: statistics, verification state, dependencies.
 use crate::deps::{Bits, Coarse, Freq};
 use crate::math::{mix64, V3};
 use std::collections::HashMap;
 
-/// Accumulateur de Welford (moyenne RGB, variance sur la luminance).
+/// Welford accumulator (RGB mean, variance on luminance).
 #[derive(Clone, Copy, Default)]
 pub struct Stat {
     pub n: f64,
@@ -21,7 +21,7 @@ impl Stat {
         self.lmean += dl / self.n;
         self.m2 += dl * (l - self.lmean);
     }
-    /// Moyenne exponentielle avec poids plancher `amin` (hystérésis type SHaRC/DDGI).
+    /// Exponential average with a floor weight `amin` (SHaRC/DDGI-style hysteresis).
     pub fn add_ema(&mut self, v: V3, amin: f64) {
         self.n += 1.0;
         let a = (1.0 / self.n).max(amin);
@@ -42,7 +42,7 @@ impl Stat {
         self.m2 += o.m2 + dl * dl * self.n * o.n / n;
         self.n = n;
     }
-    /// Plafonne le poids de l'historique à `nmax` échantillons.
+    /// Caps the history's weight at `nmax` samples.
     pub fn cap(&mut self, nmax: f64) {
         if self.n > nmax {
             self.m2 *= (nmax - 1.0) / (self.n - 1.0);
@@ -51,7 +51,7 @@ impl Stat {
     }
 }
 
-/// z-score de la différence de moyennes de luminance entre deux accumulateurs.
+/// z-score of the difference of luminance means between two accumulators.
 pub fn zscore(a: &Stat, b: &Stat) -> f64 {
     let v = a.var().max(b.var()).max(1e-8);
     (a.lmean - b.lmean).abs() / (v / a.n + v / b.n).sqrt()
@@ -60,20 +60,20 @@ pub fn zscore(a: &Stat, b: &Stat) -> f64 {
 #[derive(Clone, Default)]
 pub struct Cell {
     pub main: Stat,
-    /// Échantillons frais d'une cellule suspecte, en attente de vérification.
+    /// Fresh samples of a suspect cell, waiting for verification.
     pub fresh: Option<Stat>,
-    /// Fenêtre récente du filet de sécurité.
+    /// Recent window of the safety net.
     pub recent: Stat,
-    /// Régions traversées par les échantillons récents. Avec vieillissement, deux ensembles
-    /// alternés couvrent les K à 2K derniers échantillons : une région traversée avec une
-    /// fréquence ≪ 1/K est oubliée (son influence est bornée par cette fréquence).
+    /// Regions crossed by recent samples. With ageing, two alternating sets
+    /// cover the last K to 2K samples: a region crossed with a
+    /// frequency ≪ 1/K is forgotten (its influence is bounded by that frequency).
     pub deps: Bits,
     pub deps_prev: Bits,
-    /// mêmes dépendances à résolution grossière (niveaux 1 et 2), pour l'expérience mémoire
+    /// same dependencies at coarse resolution (levels 1 and 2), for the memory experiment
     pub cdeps: Coarse,
     pub cdeps_prev: Coarse,
     pub dep_count: u32,
-    /// Fréquences des sommets de chemin par super-région, mêmes fenêtres alternées que `deps`.
+    /// Frequencies of path vertices per super-region, same alternating windows as `deps`.
     pub freq: Freq,
     pub freq_prev: Freq,
     pub objs: u128,
@@ -113,7 +113,7 @@ impl Cell {
             }
         }
     }
-    /// Fraction des échantillons récents qui ont un sommet dans la super-région.
+    /// Fraction of recent samples with a vertex in the super-region.
     pub fn freq_of(&self, s: usize) -> f64 {
         let n = self.freq.n as f64 + self.freq_prev.n as f64;
         if n == 0.0 {
@@ -121,8 +121,8 @@ impl Cell {
         }
         ((self.freq.cnt[s] as f64 + self.freq_prev.cnt[s] as f64) / n).min(1.0)
     }
-    /// La cellule a-t-elle traversé ces régions récemment ? `level` 0 : bitset fin (0,6 m),
-    /// 1 : 1,2 m, 2 : super-régions (2,4 m). Grossier = plus de suspects, jamais moins.
+    /// Did the cell cross these regions recently? `level` 0: fine bitset (0.6 m),
+    /// 1: 1.2 m, 2: super-regions (2.4 m). Coarser = more suspects, never fewer.
     pub fn depends_on(&self, regions: &Bits, coarse: &Coarse, level: u8) -> bool {
         if level == 0 {
             self.deps.intersects(regions) || self.deps_prev.intersects(regions)
@@ -155,11 +155,11 @@ impl Cache {
     }
 }
 
-/// Taille de cellule visée en empreintes de pixel ; quantifiée en puissances de 2 (≈ 2–4 pixels).
+/// Target cell size in pixel footprints; quantised in powers of 2 (≈ 2–4 pixels).
 pub const CELL_PX: f64 = 4.0;
 
-/// Clé de hachage spatial jitteré (Binder et al.) : le jitter est tangent à la surface.
-/// `footprint` : taille d'un pixel projetée à la distance du point.
+/// Jittered spatial hash key (Binder et al.): the jitter is tangent to the surface.
+/// `footprint`: size of a pixel projected at the point's distance.
 pub fn cell_key(p: V3, n: V3, footprint: f64, px: usize, slot: usize) -> u64 {
     let level = (CELL_PX * footprint).log2().floor();
     let s = level.exp2();

@@ -20,7 +20,7 @@ pub struct Object {
     pub albedo: V3,
 }
 
-/// Lampe rectangulaire horizontale émettant vers le bas.
+/// Horizontal rectangular lamp emitting downward.
 pub struct Light {
     pub center: V3,
     pub hx: f64,
@@ -39,7 +39,7 @@ impl Light {
     }
 }
 
-/// Identifiants pour les empreintes « objets touchés » : objet i -> i, lampe j -> LIGHT_ID_BASE + j.
+/// Identifiers for the "objects touched" footprints: object i -> i, lamp j -> LIGHT_ID_BASE + j.
 pub const LIGHT_ID_BASE: usize = 64;
 pub const MOVING_BOX: usize = 0;
 
@@ -57,7 +57,7 @@ pub struct Scene {
     pub lights: Vec<Light>,
 }
 
-/// État discret de la scène : ce qui change au cours de la séquence.
+/// Discrete state of the scene: what changes during the sequence.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct State {
     pub box_step: u32,
@@ -93,10 +93,10 @@ fn bx(min: V3, max: V3, albedo: V3) -> Object {
     Object { aabb: Aabb { min, max }, albedo }
 }
 
-/// Pièces en enfilade vues en coupe (« maison de poupée »), reliées par des portes.
-/// Pièce k : x ∈ [5.2k, 5.2(k+1)] (cloisons de 0.2 centrées sur 5.2k), y ∈ [0, 3], z ∈ [0, 4],
-/// face avant ouverte. Pièce 0 (A) : boîte mobile, colonne, plafonnier 0. Pièce 1 (B) : lampe 2
-/// commutée. Pièces k ≥ 1 : deux blocs et un plafonnier.
+/// Rooms in a row seen in cross-section ("doll's house"), connected by doors.
+/// Room k: x ∈ [5.2k, 5.2(k+1)] (partitions of 0.2 centred on 5.2k), y ∈ [0, 3], z ∈ [0, 4],
+/// open front. Room 0 (A): moving box, column, ceiling light 0. Room 1 (B): switched
+/// lamp 2. Rooms k ≥ 1: two blocks and a ceiling light.
 pub fn build(s: &State, rooms: usize) -> Scene {
     let white = V3::splat(0.75);
     let red = v3(0.75, 0.2, 0.15);
@@ -115,9 +115,9 @@ pub fn build(s: &State, rooms: usize) -> Scene {
         let x = 5.2 * k as f64;
         objects.push(bx(v3(x - 0.1, 0.0, 0.0), v3(x + 0.1, 3.0, 1.5), white)); // cloison
         objects.push(bx(v3(x - 0.1, 0.0, 2.5), v3(x + 0.1, 3.0, 4.0), white));
-        objects.push(bx(v3(x - 0.1, 2.2, 1.5), v3(x + 0.1, 3.0, 2.5), white)); // linteau de la porte
+        objects.push(bx(v3(x - 0.1, 2.2, 1.5), v3(x + 0.1, 3.0, 2.5), white)); // door lintel
     }
-    objects.push(bx(v3(3.6, 0.0, 0.6), v3(4.2, 1.8, 1.2), white)); // colonne pièce A
+    objects.push(bx(v3(3.6, 0.0, 0.6), v3(4.2, 1.8, 1.2), white)); // column in room A
     for k in 1..rooms {
         let x = 5.2 * k as f64;
         objects.push(bx(v3(x + 1.0, 0.0, 1.0), v3(x + 1.8, 0.7, 1.8), v3(0.8, 0.7, 0.3)));
@@ -205,7 +205,7 @@ impl Scene {
         })
     }
 
-    /// Renvoie le premier objet qui bloque le segment [o, o + d·tmax] et sa distance.
+    /// Returns the first object blocking segment [o, o + d·tmax] and its distance.
     pub fn occluder(&self, o: V3, d: V3, tmax: f64) -> Option<(usize, f64)> {
         let inv = v3(1.0 / d.x, 1.0 / d.y, 1.0 / d.z);
         let mut best = None;
@@ -230,7 +230,7 @@ impl Scene {
     }
 }
 
-/// Base orthonormée autour de n.
+/// Orthonormal basis around n.
 pub fn frame(n: V3) -> (V3, V3) {
     let a = if n.x.abs() > 0.9 { v3(0.0, 1.0, 0.0) } else { v3(1.0, 0.0, 0.0) };
     let t = n.cross(a).norm();

@@ -7,7 +7,7 @@ use crate::tracer::{Opts, Req, Traced};
 
 const WG: u32 = 64;
 const MAX_BATCH: usize = 131_072;
-/// chemins par requête et par dispatch (au-delà : plusieurs dispatchs, évite le watchdog du pilote)
+/// paths per request and per dispatch (beyond: several dispatches, avoids the driver's watchdog)
 const SPP_CHUNK: u32 = 64;
 const MASKS: usize = 8;
 const REGION_WORDS: usize = WORDS * 2; // u64 -> u32
@@ -58,7 +58,7 @@ struct Params {
     pad: [u32; 3],
 }
 
-/// Scène au format GPU ; `toggle_w` : poids allumée_avant − allumée_après par lampe.
+/// Scene in GPU format; `toggle_w`: weight on_before − on_after per lamp.
 pub(crate) fn scene_to_gpu(scene: &Scene, toggle_w: &[f64]) -> (Vec<GBox>, Vec<GLight>) {
     let boxes = scene
         .objects
@@ -89,7 +89,7 @@ pub(crate) fn f3(v: V3) -> [f32; 3] {
     [v.x as f32, v.y as f32, v.z as f32]
 }
 
-/// Buffers persistants (agrandis si nécessaire) : les recréer à chaque appel coûtait ~85 ms.
+/// Persistent buffers (grown if needed): recreating them on every call cost ~85 ms.
 struct Bufs {
     cap: usize,
     params: wgpu::Buffer,
@@ -104,19 +104,19 @@ struct Bufs {
 pub(crate) const MAX_BOXES: usize = 64;
 pub(crate) const MAX_LIGHTS: usize = 16;
 
-/// Profil cumulé des appels (ms) : où passe le temps d'un lot.
+/// Accumulated profile of the calls (ms): where a batch's time goes.
 #[derive(Default, Clone, Debug)]
 pub struct Prof {
     pub calls: usize,
-    /// préparation des tâches et de la scène côté CPU
+    /// preparation of the tasks and the scene on the CPU side
     pub build: f64,
-    /// write_buffer (copie vers la zone de transfert)
+    /// write_buffer (copy into the staging area)
     pub upload: f64,
-    /// submit → fin du travail GPU (noyau + copies + synchronisation)
+    /// submit → end of the GPU work (kernel + copies + synchronisation)
     pub wait: f64,
     /// noyau seul (timestamps GPU)
     pub kernel: f64,
-    /// lecture des buffers mappés
+    /// read of the mapped buffers
     pub read: f64,
     /// conversion en structures CPU (V3 f64, DepRec)
     pub convert: f64,
@@ -160,7 +160,7 @@ impl Gpu {
         if info.device_type == wgpu::DeviceType::Cpu {
             return None;
         }
-        // timestamps, et ray tracing matériel si l'adaptateur le propose (Vulkan sur RTX)
+        // timestamps, and hardware ray tracing if the adapter offers it (Vulkan on RTX)
         let features = adapter.features()
             & (wgpu::Features::TIMESTAMP_QUERY
                 | wgpu::Features::EXPERIMENTAL_RAY_TRACING_ACCELERATION_STRUCTURE
@@ -255,7 +255,7 @@ impl Gpu {
                 self.dispatch(scene, chunk, o, o.spp, 0, &mut out, 1.0);
                 continue;
             }
-            // beaucoup de chemins par requête (références) : plusieurs dispatchs, graines distinctes
+            // many paths per request (references): several dispatches, distinct seeds
             let mut part = Traced::default();
             for pass in 0..o.spp.div_ceil(SPP_CHUNK) {
                 let spp = SPP_CHUNK.min(o.spp - pass * SPP_CHUNK);
@@ -277,7 +277,7 @@ impl Gpu {
         out
     }
 
-    /// Trace un lot et ajoute ses résultats (pondérés par `w`) à `out`.
+    /// Traces a batch and adds its results (weighted by `w`) to `out`.
     #[allow(clippy::too_many_arguments)]
     fn dispatch(&self, scene: &Scene, reqs: &[Req], o: &Opts, spp: u32, pass: u64, out: &mut Traced, w: f64) {
         let n = reqs.len();
@@ -324,7 +324,7 @@ impl Gpu {
         q.write_buffer(&bufs.boxes, 0, bytemuck::cast_slice(&boxes));
         q.write_buffer(&bufs.lights, 0, bytemuck::cast_slice(&lights));
         q.write_buffer(&bufs.tasks, 0, bytemuck::cast_slice(&tasks));
-        // seules les plages utiles sont copiées puis relues
+        // only the useful ranges are copied and read back
         let sizes = [
             (n * 16) as u64,
             (n * 16) as u64,

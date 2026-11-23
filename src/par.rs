@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-/// map parallèle sur 0..n avec vol de travail par paquets ; l'ordre des résultats est conservé.
+/// parallel map over 0..n with work stealing by chunks; the order of results is kept.
 pub fn par_map<T: Send, F: Fn(usize) -> T + Sync>(n: usize, f: F) -> Vec<T> {
     const CHUNK: usize = 32;
     let threads = std::thread::available_parallelism().map(|x| x.get()).unwrap_or(4);

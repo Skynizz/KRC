@@ -1,4 +1,4 @@
-//! Path tracer diffus avec NEE, instrumenté pour enregistrer les dépendances d'un chemin.
+//! Diffuse path tracer with NEE, instrumented to record a path's dependencies.
 use crate::deps::{mark_segment, Bits};
 use crate::math::{Rng, V3};
 use crate::scene::{cosine_dir, Scene, LIGHT_ID_BASE};
@@ -10,7 +10,7 @@ pub trait Rec {
     fn segment(&mut self, a: V3, b: V3);
     fn object(&mut self, id: usize);
     fn light_selected(&mut self, _j: usize) {}
-    /// sommet du chemin (point où il rebondit) : c'est là qu'un changement de lumière est capté
+    /// path vertex (point where it bounces): that is where a light change is picked up
     fn vertex(&mut self, _p: V3) {}
 }
 
@@ -20,13 +20,13 @@ impl Rec for NoRec {
     fn object(&mut self, _: usize) {}
 }
 
-/// Dépendances d'un chemin : régions traversées (H*), objets touchés (H0), lampes choisies par NEE.
+/// Dependencies of a path: regions crossed (H*), objects touched (H0), lamps chosen by NEE.
 #[derive(Default)]
 pub struct DepRec {
     pub regions: Bits,
     pub objs: u128,
     pub lights: u64,
-    /// super-régions contenant les sommets du chemin (bit s = super-région s)
+    /// super-regions holding the path's vertices (bit s = super-region s)
     pub vsup: u64,
 }
 impl Rec for DepRec {
@@ -44,8 +44,8 @@ impl Rec for DepRec {
     }
 }
 
-/// Choix de lampe ∝ puissance. En mode `union`, la pmf ignore l'état allumé/éteint : deux scènes
-/// qui ne diffèrent que par une lampe consomment alors les mêmes nombres aléatoires (chemins corrélés).
+/// Lamp choice ∝ power. In `union` mode, the pmf ignores the on/off state: two scenes
+/// that differ only by a lamp then consume the same random numbers (correlated paths).
 fn sample_light(scene: &Scene, rng: &mut Rng, union: bool) -> Option<(usize, f64)> {
     let power = |j: usize| if union { scene.light_power_if_on(j) } else { scene.light_power(j) };
     let total: f64 = (0..scene.lights.len()).map(power).sum();
@@ -63,12 +63,12 @@ fn sample_light(scene: &Scene, rng: &mut Rng, union: bool) -> Option<(usize, f64
     None
 }
 
-/// Estimateur à un échantillon de la radiance sortante (diffuse) au point p de normale n.
-/// La consommation de nombres aléatoires par sommet est fixe, pour l'échantillonnage corrélé.
-/// Renvoie aussi Σ_j w_j · C_j, où C_j est la contribution NEE qu'aurait la
-/// lampe j si elle était allumée (géométrie identique). Pour un changement qui ne touche que des
-/// lampes, avec w_j = allumée_avant − allumée_après, l'ancienne radiance vaut L + Σ w_j C_j :
-/// le chemin de l'ancienne scène n'a pas besoin d'être retracé.
+/// One-sample estimator of the outgoing (diffuse) radiance at point p with normal n.
+/// The consumption of random numbers per vertex is fixed, for correlated sampling.
+/// Also returns Σ_j w_j · C_j, where C_j is the NEE contribution lamp j would
+/// have if it were on (identical geometry). For a change touching only
+/// lamps, with w_j = on_before − on_after, the old radiance is L + Σ w_j C_j:
+/// the path of the old scene does not need to be retraced.
 #[allow(clippy::too_many_arguments)]
 pub fn radiance_split<R: Rec>(
     scene: &Scene,
@@ -99,9 +99,9 @@ pub fn radiance_split<R: Rec>(
             let (cos_x, cos_l) = (n.dot(wd), wd.y);
             let wj = toggle_w.get(j).copied().unwrap_or(0.0);
             if cos_x > 0.0 && cos_l > 0.0 && !li.on && wj == 0.0 {
-                rec.segment(origin, q); // lampe éteinte (mode union) : dépendance conservatrice
+                rec.segment(origin, q); // lamp off (union mode): conservative dependency
             } else if cos_x > 0.0 && cos_l > 0.0 {
-                // un rayon d'ombre bloqué ne dépend que de l'espace jusqu'à l'occulteur
+                // a blocked shadow ray depends only on the space up to the occluder
                 match scene.occluder(origin, wd, dist - 1e-6) {
                     Some((o, t)) => {
                         rec.segment(origin, origin + wd * t);
@@ -133,7 +133,7 @@ pub fn radiance_split<R: Rec>(
                 rec.segment(origin, h.p);
                 rec.object(h.id);
                 if h.light.is_some() {
-                    break; // émission déjà comptée par NEE
+                    break; // emission already counted by NEE
                 }
                 rec.vertex(h.p);
                 p = h.p;

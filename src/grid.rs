@@ -1,9 +1,9 @@
-//! Grille de régions propre à une scène (dépendances), et son bloc WGSL.
-//! La grille des pièces en enfilade (deps.rs) en est un cas particulier : Grid::boxes().
+//! Region grid specific to a scene (dependencies), and its WGSL block.
+//! The grid of rooms in a row (deps.rs) is a special case of it: Grid::boxes().
 use crate::math::{v3, V3};
 use crate::scene::Aabb;
 
-/// Bits de régions fines côté GPU (108 mots u32) et compteurs de super-régions (36).
+/// Fine region bits on the GPU side (108 u32 words) and super-region counters (36).
 pub const MAX_REGIONS: i64 = 3456;
 pub const MAX_SUPERS: i64 = 36;
 
@@ -12,7 +12,7 @@ pub struct Grid {
     pub origin: V3,
     pub region: f64,
     pub dims: [i64; 3],
-    /// une super-région = sdiv régions par axe
+    /// a super-region = sdiv regions per axis
     pub sdiv: [i64; 3],
 }
 
@@ -21,8 +21,8 @@ impl Grid {
         Grid { origin: v3(-0.2, -0.2, -0.2), region: 0.6, dims: [72, 6, 8], sdiv: [4, 6, 4] }
     }
 
-    /// Plus petites régions (≥ 0,3 m) qui couvrent la boîte en ≤ MAX_REGIONS, puis super-régions
-    /// cubiques les plus petites qui tiennent en ≤ MAX_SUPERS.
+    /// Smallest regions (≥ 0.3 m) covering the box in ≤ MAX_REGIONS, then the smallest cubic
+    /// super-regions that fit in ≤ MAX_SUPERS.
     pub fn fit(b: &Aabb) -> Grid {
         let size = b.max - b.min;
         let mut region = 0.3;
@@ -62,7 +62,7 @@ impl Grid {
         (((c[2] / self.sdiv[2]) * sd[1] + c[1] / self.sdiv[1]) * sd[0] + c[0] / self.sdiv[0]) as usize
     }
 
-    /// Bits des régions qui recouvrent la boîte (format GPU : 108 mots u32).
+    /// Bits of the regions overlapping the box (GPU format: 108 u32 words).
     pub fn mark_aabb(&self, bits: &mut [u32], b: &Aabb) {
         let (lo, hi) = (self.cell_of(b.min), self.cell_of(b.max));
         for z in lo[2]..=hi[2] {
@@ -75,7 +75,7 @@ impl Grid {
         }
     }
 
-    /// Masque des super-régions touchées par un ensemble de régions fines.
+    /// Mask of the super-regions touched by a set of fine regions.
     pub fn supers_of_bits(&self, bits: &[u32]) -> u64 {
         let mut m = 0u64;
         for (w, &word) in bits.iter().enumerate() {
@@ -90,11 +90,11 @@ impl Grid {
         m
     }
 
-    /// Remplace le bloc `// <grille>` … `// </grille>` du shader par les constantes de cette grille.
+    /// Replaces the `// <grid>` … `// </grid>` block of the shader with this grid's constants.
     pub fn template(&self, src: &str) -> String {
-        let (a, b) = (src.find("// <grille>").unwrap(), src.find("// </grille>").unwrap());
+        let (a, b) = (src.find("// <grid>").unwrap(), src.find("// </grid>").unwrap());
         let block = format!(
-            "// <grille>\nconst REGION: f32 = {:.6};\nconst ORIGIN: vec3<f32> = vec3<f32>({:.6}, {:.6}, {:.6});\n\
+            "// <grid>\nconst REGION: f32 = {:.6};\nconst ORIGIN: vec3<f32> = vec3<f32>({:.6}, {:.6}, {:.6});\n\
 const DIMS: vec3<i32> = vec3<i32>({}, {}, {});\nconst SDIV: vec3<i32> = vec3<i32>({}, {}, {});\n\
 const SDIMS: vec3<i32> = vec3<i32>({}, {}, {});\n",
             self.region,
