@@ -1,7 +1,7 @@
 {
  "reglages": {
   "scene": "LivingRoom.scene.json",
-  "name": "salon_krcl",
+  "name": "living_room_krcl",
   "methods": [
    "sharc",
    "krcl"
@@ -16,7 +16,7 @@
    "nrd_flip": 0.07299272529780865,
    "nrd_flip_ecart": 0.0012657800542297648,
    "nrd_psnr": 32.18322896771696,
-   "bruit_brut": 0.14355770610572788,
+   "noise_raw": 0.14355770610572788,
    "biais_flip": 0.07428844273090363,
    "biais_relmse": 0.016251563506197896,
    "lum": 1.0209547313403255,
@@ -26,7 +26,7 @@
    "nrd_flip": 0.07226875144988298,
    "nrd_flip_ecart": 0.001022344411159893,
    "nrd_psnr": 32.21494998251423,
-   "bruit_brut": 0.14310237974184886,
+   "noise_raw": 0.14310237974184886,
    "biais_flip": 0.07617631554603577,
    "biais_relmse": 0.01665799501499919,
    "lum": 1.0228958376401587,

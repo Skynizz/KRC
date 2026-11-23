@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 380" font-family="system-ui, sans-serif" font-size="12">
 <rect width="760" height="380" fill="#fcfcfb"/>
-<text x="70" y="22" font-size="15" font-weight="600" fill="#0b0b0b">Erreur par frame à budget égal (1 chemin/pixel/frame)</text>
-<text x="70" y="40" fill="#52514e">relMSE moyenne sur 5 graines, échelle log ; plus bas = mieux</text>
+<text x="70" y="22" font-size="15" font-weight="600" fill="#0b0b0b">Error per frame at equal budget (1 path/pixel/frame)</text>
+<text x="70" y="40" fill="#52514e">relMSE averaged over 5 seeds, log scale; lower is better</text>
 <line x1="70" x2="590" y1="334.0" y2="334.0" stroke="#e4e3df"/>
 <text x="62" y="338.0" text-anchor="end" fill="#52514e">1e-3</text>
 <line x1="70" x2="590" y1="242.0" y2="242.0" stroke="#e4e3df"/>
@@ -11,13 +11,13 @@
 <line x1="70" x2="590" y1="58.0" y2="58.0" stroke="#e4e3df"/>
 <text x="62" y="62.0" text-anchor="end" fill="#52514e">1e0</text>
 <line x1="244.8" x2="244.8" y1="58" y2="334" stroke="#52514e" stroke-dasharray="3 3" opacity="0.6"/>
-<text x="247.8" y="69" fill="#52514e" font-size="10">la boîte bouge</text>
+<text x="247.8" y="69" fill="#52514e" font-size="10">box starts moving</text>
 <line x1="349.7" x2="349.7" y1="58" y2="334" stroke="#52514e" stroke-dasharray="3 3" opacity="0.6"/>
-<text x="352.7" y="81" fill="#52514e" font-size="10">boîte immobile</text>
+<text x="352.7" y="81" fill="#52514e" font-size="10">box stops</text>
 <line x1="419.6" x2="419.6" y1="58" y2="334" stroke="#52514e" stroke-dasharray="3 3" opacity="0.6"/>
-<text x="422.6" y="69" fill="#52514e" font-size="10">lampe B allumée</text>
+<text x="422.6" y="69" fill="#52514e" font-size="10">lamp B on</text>
 <line x1="507.0" x2="507.0" y1="58" y2="334" stroke="#52514e" stroke-dasharray="3 3" opacity="0.6"/>
-<text x="510.0" y="81" fill="#52514e" font-size="10">lampe A éteinte</text>
+<text x="510.0" y="81" fill="#52514e" font-size="10">lamp A off</text>
 <text x="70.0" y="352" text-anchor="middle" fill="#52514e">0</text>
 <text x="157.4" y="352" text-anchor="middle" fill="#52514e">20</text>
 <text x="244.8" y="352" text-anchor="middle" fill="#52514e">40</text>

@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 380" font-family="system-ui, sans-serif" font-size="12">
 <rect width="760" height="380" fill="#fcfcfb"/>
-<text x="70" y="22" font-size="15" font-weight="600" fill="#0b0b0b">Coût d'un changement de lampe selon la taille de la scène</text>
-<text x="70" y="40" fill="#52514e">chemins corrélés tracés à l'événement (lampe B allumée, lampe A éteinte), moyenne sur graines</text>
+<text x="70" y="22" font-size="15" font-weight="600" fill="#0b0b0b">Cost of a lamp change versus scene size</text>
+<text x="70" y="40" fill="#52514e">correlated paths traced at the event (lamp B on, lamp A off), mean over seeds</text>
 <line x1="70" x2="590" y1="334.0" y2="334.0" stroke="#e4e3df"/>
 <text x="62" y="338.0" text-anchor="end" fill="#52514e">0</text>
 <line x1="70" x2="590" y1="299.5" y2="299.5" stroke="#e4e3df"/>
@@ -23,8 +23,8 @@
 <text x="70.0" y="352" text-anchor="middle" fill="#52514e">2</text>
 <text x="243.3" y="352" text-anchor="middle" fill="#52514e">4</text>
 <text x="590.0" y="352" text-anchor="middle" fill="#52514e">8</text>
-<text x="330.0" y="372" text-anchor="middle" fill="#52514e">nombre de pièces (96 px de large par pièce)</text>
-<text transform="translate(16 196.0) rotate(-90)" text-anchor="middle" fill="#52514e">chemins / événement</text>
+<text x="330.0" y="372" text-anchor="middle" fill="#52514e">number of rooms (96 px wide per room)</text>
+<text transform="translate(16 196.0) rotate(-90)" text-anchor="middle" fill="#52514e">paths / event</text>
 <polyline points="70.0,252.5 243.3,191.4 590.0,88.4" fill="none" stroke="#2a78d6" stroke-width="2" stroke-linejoin="round"/>
 <circle cx="70.0" cy="252.5" r="4" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"/>
 <circle cx="243.3" cy="191.4" r="4" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"/>

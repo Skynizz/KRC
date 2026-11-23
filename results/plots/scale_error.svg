@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 380" font-family="system-ui, sans-serif" font-size="12">
 <rect width="760" height="380" fill="#fcfcfb"/>
-<text x="70" y="22" font-size="15" font-weight="600" fill="#0b0b0b">Passage à l'échelle : erreur pendant les phases dynamiques</text>
-<text x="70" y="40" fill="#52514e">relMSE à budget égal (1 chemin/pixel/frame), échelle log</text>
+<text x="70" y="22" font-size="15" font-weight="600" fill="#0b0b0b">Scaling: error during the dynamic phases</text>
+<text x="70" y="40" fill="#52514e">relMSE at equal budget (1 path/pixel/frame), log scale</text>
 <line x1="70" x2="590" y1="334.0" y2="334.0" stroke="#e4e3df"/>
 <text x="62" y="338.0" text-anchor="end" fill="#52514e">1e-3</text>
 <line x1="70" x2="590" y1="196.0" y2="196.0" stroke="#e4e3df"/>
@@ -11,7 +11,7 @@
 <text x="70.0" y="352" text-anchor="middle" fill="#52514e">2</text>
 <text x="243.3" y="352" text-anchor="middle" fill="#52514e">4</text>
 <text x="590.0" y="352" text-anchor="middle" fill="#52514e">8</text>
-<text x="330.0" y="372" text-anchor="middle" fill="#52514e">nombre de pièces (96 px de large par pièce)</text>
+<text x="330.0" y="372" text-anchor="middle" fill="#52514e">number of rooms (96 px wide per room)</text>
 <text transform="translate(16 196.0) rotate(-90)" text-anchor="middle" fill="#52514e">relMSE</text>
 <polyline points="70.0,157.7 243.3,143.1 590.0,131.7" fill="none" stroke="#2a78d6" stroke-width="2" stroke-linejoin="round"/>
 <circle cx="70.0" cy="157.7" r="4" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"/>

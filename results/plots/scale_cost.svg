@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 380" font-family="system-ui, sans-serif" font-size="12">
 <rect width="760" height="380" fill="#fcfcfb"/>
-<text x="70" y="22" font-size="15" font-weight="600" fill="#0b0b0b">Passage à l'échelle : coût pendant que la boîte bouge</text>
-<text x="70" y="40" fill="#52514e">chemins/frame en mode qualité cible (cache convergé) ; la boîte reste dans la pièce 0</text>
+<text x="70" y="22" font-size="15" font-weight="600" fill="#0b0b0b">Scaling: cost while the box moves</text>
+<text x="70" y="40" fill="#52514e">paths/frame in target-quality mode (converged cache); the box stays in room 0</text>
 <line x1="70" x2="590" y1="334.0" y2="334.0" stroke="#e4e3df"/>
 <text x="62" y="338.0" text-anchor="end" fill="#52514e">0</text>
 <line x1="70" x2="590" y1="303.3" y2="303.3" stroke="#e4e3df"/>
@@ -25,8 +25,8 @@
 <text x="70.0" y="352" text-anchor="middle" fill="#52514e">2</text>
 <text x="243.3" y="352" text-anchor="middle" fill="#52514e">4</text>
 <text x="590.0" y="352" text-anchor="middle" fill="#52514e">8</text>
-<text x="330.0" y="372" text-anchor="middle" fill="#52514e">nombre de pièces (96 px de large par pièce)</text>
-<text transform="translate(16 196.0) rotate(-90)" text-anchor="middle" fill="#52514e">chemins / frame</text>
+<text x="330.0" y="372" text-anchor="middle" fill="#52514e">number of rooms (96 px wide per room)</text>
+<text transform="translate(16 196.0) rotate(-90)" text-anchor="middle" fill="#52514e">paths / frame</text>
 <polyline points="70.0,269.1 243.3,207.5 590.0,81.3" fill="none" stroke="#2a78d6" stroke-width="2" stroke-linejoin="round"/>
 <circle cx="70.0" cy="269.1" r="4" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"/>
 <circle cx="243.3" cy="207.5" r="4" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"/>

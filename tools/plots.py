@@ -1,13 +1,13 @@
-"""Graphiques SVG statiques (sans dépendance) à partir de results/*/metrics.csv et results/scale/summary.csv."""
+"""Static SVG charts (no dependency) from results/*/metrics.csv and results/scale/summary.csv."""
 import csv
 import math
 import os
 
 ROOT = os.path.join(os.path.dirname(__file__), "..", "results")
-# palette catégorielle de référence (ordre fixe), surface claire
+# reference categorical palette (fixed order), light surface
 SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300"]
 SURFACE, INK, INK2, GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#e4e3df"
-EVENTS = [(40, "la boîte bouge"), (64, "boîte immobile"), (80, "lampe B allumée"), (100, "lampe A éteinte")]
+EVENTS = [(40, "box starts moving"), (64, "box stops"), (80, "lamp B on"), (100, "lamp A off")]
 
 
 def read_csv(path):
@@ -16,7 +16,7 @@ def read_csv(path):
 
 
 def frames(method, col, seeds=5):
-    """Moyenne sur les graines disponibles de la colonne `col`, par frame."""
+    """Mean over the available seeds of column `col`, per frame."""
     runs = []
     for s in range(seeds):
         name = "metrics.csv" if s == 0 else f"metrics_s{s}.csv"
@@ -78,7 +78,7 @@ def line_chart(path, title, subtitle, series, ylabel, logy=False, events=True, x
             for x, y in zip(allx, v):
                 o.append(f'<circle cx="{gx(x):.1f}" cy="{f(y):.1f}" r="4" fill="{c}" stroke="{SURFACE}" stroke-width="2"/>')
         ends.append([f(v[-1]), name, c])
-    # étiquettes directes en fin de courbe, décollées pour éviter les chevauchements
+    # direct labels at the end of each line, pushed apart to avoid overlaps
     ends.sort()
     for k in range(1, len(ends)):
         ends[k][0] = max(ends[k][0], ends[k - 1][0] + 14)
@@ -91,7 +91,7 @@ def line_chart(path, title, subtitle, series, ylabel, logy=False, events=True, x
 
 
 def bar_chart(path, title, subtitle, rows, xlabel):
-    """Barres horizontales, une seule série (magnitude), échelle log."""
+    """Horizontal bars, a single series (magnitude), log scale."""
     W, rowh, L, R, T = 760, 26, 150, 90, 58
     H = T + rowh * len(rows) + 40
     pw = W - L - R
@@ -126,17 +126,17 @@ def main():
     pareto_plot(out)
     duel_plot(out)
     fixed = ["pt_reset", "cache_reset", "krc_hard", "krc"]
-    line_chart(os.path.join(out, "erreur_par_frame.svg"), "Erreur par frame à budget égal (1 chemin/pixel/frame)",
-               "relMSE moyenne sur 5 graines, échelle log ; plus bas = mieux",
+    line_chart(os.path.join(out, "error_per_frame.svg"), "Error per frame at equal budget (1 path/pixel/frame)",
+               "relMSE averaged over 5 seeds, log scale; lower is better",
                [(m, frames(m, "relmse")) for m in fixed], "relMSE", logy=True)
     targets = ["cache_reset_target", "krc_hard_target", "krc_target"]
-    line_chart(os.path.join(out, "cout_par_frame.svg"), "Coût par frame en mode qualité cible (σ/μ ≤ 3 % par cellule)",
-               "chemins tracés par frame (moyenne 5 graines), plafond 4 chemins/pixel",
-               [(m, frames(m, "paths")) for m in targets], "chemins / frame")
-    summ = [r for r in read_csv(os.path.join(ROOT, "summary.csv")) if r["phase"] == "tout" and not r["method"].endswith("_target")]
+    line_chart(os.path.join(out, "cost_per_frame.svg"), "Cost per frame in target-quality mode (σ/μ ≤ 3 % per cell)",
+               "paths traced per frame (mean of 5 seeds), cap 4 paths/pixel",
+               [(m, frames(m, "paths")) for m in targets], "paths / frame")
+    summ = [r for r in read_csv(os.path.join(ROOT, "summary.csv")) if r["phase"] == "all" and not r["method"].endswith("_target")]
     rows = sorted(((r["method"], float(r["relmse_mean"]), float(r["relmse_std"])) for r in summ), key=lambda r: r[1])
-    bar_chart(os.path.join(out, "ablation.svg"), "Ablation : erreur moyenne sur la séquence de 120 frames",
-              "relMSE moyenne ± écart-type (5 graines), budget égal, échelle log ; plus court = mieux", rows, "relMSE")
+    bar_chart(os.path.join(out, "ablation.svg"), "Ablation: mean error over the 120-frame sequence",
+              "mean relMSE ± standard deviation (5 seeds), equal budget, log scale; shorter is better", rows, "relMSE")
     sp = os.path.join(ROOT, "scale", "summary.csv")
     if os.path.exists(sp):
         sc = read_csv(sp)
@@ -147,11 +147,11 @@ def main():
             v = [float(r[col]) for r in sc if r["method"] == m and int(r["rooms"]) == n and r["phase"] in phases]
             return sum(v) / len(v)
 
-        ev = ("boite", "lampe_on", "lampe_off")
-        line_chart(os.path.join(out, "echelle_cout.svg"), "Passage à l'échelle : coût pendant que la boîte bouge",
-                   "chemins/frame en mode qualité cible (cache convergé) ; la boîte reste dans la pièce 0",
-                   [(m, [val(m, n, ("boite",), "paths_per_frame") for n in rooms]) for m in ms], "chemins / frame",
-                   events=False, xlabel="nombre de pièces (96 px de large par pièce)", xs=rooms)
+        ev = ("box", "lamp_on", "lamp_off")
+        line_chart(os.path.join(out, "scale_cost.svg"), "Scaling: cost while the box moves",
+                   "paths/frame in target-quality mode (converged cache); the box stays in room 0",
+                   [(m, [val(m, n, ("box",), "paths_per_frame") for n in rooms]) for m in ms], "paths / frame",
+                   events=False, xlabel="number of rooms (96 px wide per room)", xs=rooms)
         def event_cost(m, n, frames_sel):
             vals = []
             d = os.path.join(ROOT, "scale", f"n{n}", m)
@@ -163,23 +163,23 @@ def main():
             return sum(vals) / max(len(vals), 1)
 
         dm = ["krc_all", "krc_noage", "krc", "krc_energy"]
-        line_chart(os.path.join(out, "echelle_evt_lampe.svg"), "Coût d'un changement de lampe selon la taille de la scène",
-                   "chemins corrélés tracés à l'événement (lampe B allumée, lampe A éteinte), moyenne sur graines",
-                   [(m, [event_cost(m, n, {80, 100}) for n in rooms]) for m in dm], "chemins / événement",
-                   events=False, xlabel="nombre de pièces (96 px de large par pièce)", xs=rooms)
-        line_chart(os.path.join(out, "echelle_evt_boite.svg"), "Coût d'un déplacement d'objet selon la taille de la scène",
-                   "chemins corrélés tracés par pas de la boîte (pièce 0), moyenne sur graines",
-                   [(m, [event_cost(m, n, set(range(40, 64))) for n in rooms]) for m in dm], "chemins / événement",
-                   events=False, xlabel="nombre de pièces (96 px de large par pièce)", xs=rooms)
+        line_chart(os.path.join(out, "scale_evt_lamp.svg"), "Cost of a lamp change versus scene size",
+                   "correlated paths traced at the event (lamp B on, lamp A off), mean over seeds",
+                   [(m, [event_cost(m, n, {80, 100}) for n in rooms]) for m in dm], "paths / event",
+                   events=False, xlabel="number of rooms (96 px wide per room)", xs=rooms)
+        line_chart(os.path.join(out, "scale_evt_box.svg"), "Cost of an object move versus scene size",
+                   "correlated paths traced per box step (room 0), mean over seeds",
+                   [(m, [event_cost(m, n, set(range(40, 64))) for n in rooms]) for m in dm], "paths / event",
+                   events=False, xlabel="number of rooms (96 px wide per room)", xs=rooms)
         fixed_s = ["cache_reset", "krc_hard", "krc_all", "krc"]
-        line_chart(os.path.join(out, "echelle_erreur.svg"), "Passage à l'échelle : erreur pendant les phases dynamiques",
-                   "relMSE à budget égal (1 chemin/pixel/frame), échelle log",
+        line_chart(os.path.join(out, "scale_error.svg"), "Scaling: error during the dynamic phases",
+                   "relMSE at equal budget (1 path/pixel/frame), log scale",
                    [(m, [val(m, n, ev, "relmse_mean") for n in rooms]) for m in fixed_s], "relMSE",
-                   logy=True, events=False, xlabel="nombre de pièces (96 px de large par pièce)", xs=rooms)
+                   logy=True, events=False, xlabel="number of rooms (96 px wide per room)", xs=rooms)
 
 
 def scatter_lines(path, title, subtitle, series, xlabel, ylabel):
-    """Courbes erreur/temps (log-log), un point par budget, étiqueté."""
+    """Error/time curves (log-log), one labelled point per budget."""
     W, H, L, R, T, B = 760, 400, 80, 170, 58, 50
     pw, ph = W - L - R, H - T - B
     series = list(series)
@@ -226,11 +226,11 @@ def scatter_lines(path, title, subtitle, series, xlabel, ylabel):
         fh.write("\n".join(o))
 
 
-# ordre fixe des séries (une couleur par méthode, jamais réattribuée)
+# fixed series order (one colour per method, never reassigned)
 PARETO_NAMES = [
     ("tri_krc", "KRC"),
-    ("tri_sharc", "SHaRC-like (maison)"),
-    ("tri_sharc_nv_s50.0", "SHaRC NVIDIA (défaut)"),
+    ("tri_sharc", "SHaRC-like (in-house)"),
+    ("tri_sharc_nv_s50.0", "SHaRC NVIDIA (default)"),
     ("tri_sharc_nv_s100.0", "SHaRC NVIDIA, voxels /2"),
 ]
 
@@ -239,7 +239,7 @@ def pareto_label(method, ppp):
     if method.startswith("tri_sharc_nv"):
         d = round(1.0 / float(ppp) ** 0.5)
         return f"1 px/{d}×{d}"
-    return f"{ppp} ch/px"
+    return f"{ppp} path/px"
 
 
 def pareto_rows(dirname):
@@ -253,10 +253,10 @@ def pareto_rows(dirname):
 
 def pareto_plot(out):
     figs = [
-        ("cornell_1024", "pareto_cornell.svg", "Cornell box en triangles, caméra fixe, 1024×1024"),
-        ("sponza_1280x720", "pareto_sponza.svg", "Sponza, caméra fixe, 1280×720"),
-        ("cornell_cam_1024", "pareto_cornell_cam.svg", "Cornell box, caméra mobile, 1024×1024"),
-        ("sponza_cam_1280x720", "pareto_sponza_cam.svg", "Sponza, caméra mobile, 1280×720"),
+        ("cornell_1024", "pareto_cornell.svg", "triangle Cornell box, fixed camera, 1024×1024"),
+        ("sponza_1280x720", "pareto_sponza.svg", "Sponza, fixed camera, 1280×720"),
+        ("cornell_cam_1024", "pareto_cornell_cam.svg", "Cornell box, moving camera, 1024×1024"),
+        ("sponza_cam_1280x720", "pareto_sponza_cam.svg", "Sponza, moving camera, 1280×720"),
     ]
     for dirname, svg, title in figs:
         rows = pareto_rows(dirname)
@@ -268,22 +268,22 @@ def pareto_plot(out):
             series.append((label, pts))
         if not any(pts for _, pts in series):
             continue
-        scatter_lines(os.path.join(out, svg), "Erreur contre temps GPU : " + title,
-                      "RTX 4070, ray tracing matériel ; relMSE sans le 0,1 % de pixels les plus fautifs ; en bas à gauche = mieux",
-                      series, "temps GPU moyen par frame (ms)", "relMSE sur la séquence")
+        scatter_lines(os.path.join(out, svg), "Error versus GPU time: " + title,
+                      "RTX 4070, hardware ray tracing; relMSE without the worst 0.1 % of pixels; bottom left is better",
+                      series, "mean GPU time per frame (ms)", "relMSE over the sequence")
 
 
 
 def duel_plot(out):
-    """KRC v2 contre SHaRC officiel : erreur de la séquence contre temps GPU (results/campaign_v2)."""
+    """KRC v2 versus official SHaRC: sequence error versus GPU time (results/campaign_v2)."""
     import re
-    figs = [("sponza", "Sponza, caméra fixe"), ("sponzacam", "Sponza, caméra mobile"),
-            ("cornell", "Cornell box, caméra fixe"), ("cornellcam", "Cornell box, caméra mobile")]
-    pat = re.compile(r"^(.*?)\s+relMSE\* ([0-9.e+-]+) .*GPU moy ([0-9.]+) ms")
+    figs = [("sponza", "Sponza, fixed camera"), ("sponzacam", "Sponza, moving camera"),
+            ("cornell", "Cornell box, fixed camera"), ("cornellcam", "Cornell box, moving camera")]
+    pat = re.compile(r"^(.*?)\s+relMSE\* ([0-9.e+-]+) .*GPU mean ([0-9.]+) ms")
     for key, title in figs:
         rows = []
-        for f in (f"duel_{key}.txt", f"duel_{key}_reactif.txt"):
-            p = os.path.join(ROOT, "campagne_v2", f)
+        for f in (f"duel_{key}.txt", f"duel_{key}_responsive.txt"):
+            p = os.path.join(ROOT, "campaign_v2", f)
             if os.path.exists(p):
                 for line in open(p, encoding="utf8"):
                     m = pat.match(line.strip())
@@ -292,14 +292,14 @@ def duel_plot(out):
         if not rows:
             continue
         groups = [
-            ("KRC v2", lambda n: n.startswith("v2 cell8"), lambda n: n.split()[-1] + " ch/px"),
-            ("SHaRC NVIDIA (défaut)", lambda n: n.startswith("sharc_nv 1px"), lambda n: n.split()[-1]),
+            ("KRC v2", lambda n: n.startswith("v2 cell8"), lambda n: n.split()[-1] + " path/px"),
+            ("SHaRC NVIDIA (default)", lambda n: n.startswith("sharc_nv 1px"), lambda n: n.split()[-1]),
             ("SHaRC NVIDIA, accumulation 5", lambda n: n.startswith("sharc_nv acc5"), lambda n: n.split()[-1]),
         ]
         series = [(label, [(ms, e, lab(n)) for n, e, ms in rows if sel(n)]) for label, sel, lab in groups]
-        scatter_lines(os.path.join(out, f"duel_{key}.svg"), "KRC v2 contre SHaRC : " + title,
-                      "séquence de 120 frames, 3 graines, RTX 4070 ; relMSE sans le 0,1 % de pixels les plus fautifs ; en bas à gauche = mieux",
-                      series, "temps GPU moyen par frame (ms)", "relMSE sur la séquence")
+        scatter_lines(os.path.join(out, f"duel_{key}.svg"), "KRC v2 versus SHaRC: " + title,
+                      "120-frame sequence, 3 seeds, RTX 4070; relMSE without the worst 0.1 % of pixels; bottom left is better",
+                      series, "mean GPU time per frame (ms)", "relMSE over the sequence")
 
 
 if __name__ == "__main__":

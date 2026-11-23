@@ -1,7 +1,7 @@
 {
  "reglages": {
   "scene": "Bathroom.scene.json",
-  "name": "salle_de_bain",
+  "name": "bathroom",
   "methods": [
    "sharc50",
    "krca50"

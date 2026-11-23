@@ -1,7 +1,7 @@
 {
  "reglages": {
   "scene": "LivingRoom.scene.json",
-  "name": "salon_conf0",
+  "name": "living_room_conf0",
   "setup": [],
   "before": [
    "sun=20"

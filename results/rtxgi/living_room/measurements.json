@@ -1,7 +1,7 @@
 {
  "reglages": {
   "scene": "LivingRoom.scene.json",
-  "name": "salon",
+  "name": "living_room",
   "methods": [
    "sharc50",
    "krca50",
